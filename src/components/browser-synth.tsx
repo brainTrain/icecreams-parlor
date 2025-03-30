@@ -32,7 +32,10 @@ const SynthContainer = styled.div`
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   width: 100%;
   max-width: 100%;
-  overflow-x: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 `;
 
 const Controls = styled.div`
@@ -186,6 +189,68 @@ const Instructions = styled.div`
   text-align: center;
   font-size: 1.1rem;
   opacity: 0.8;
+  max-width: 400px;
+  margin: 0 auto;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+`;
+
+const WarningMessage = styled.div`
+  color: #ff4444;
+  text-align: center;
+  font-size: 0.9rem;
+  opacity: 0.9;
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: rgba(255, 68, 68, 0.1);
+  border-radius: 4px;
+`;
+
+const PowerSwitch = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+`;
+
+const SwitchContainer = styled.div`
+  position: relative;
+  width: 60px;
+  height: 30px;
+  background: #2a2a2a;
+  border-radius: 15px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+`;
+
+const SwitchButton = styled.div<{ $isOn: boolean }>`
+  position: absolute;
+  top: 2px;
+  left: ${props => (props.$isOn ? '32px' : '2px')};
+  width: 26px;
+  height: 26px;
+  background: #ffffff;
+  border-radius: 50%;
+  transition: left 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+`;
+
+const LED = styled.div<{ $isOn: boolean }>`
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: ${props => (props.$isOn ? '#ff4444' : '#333333')};
+  box-shadow: ${props =>
+    props.$isOn ? '0 0 10px #ff4444, 0 0 20px #ff4444, 0 0 30px #ff4444' : 'none'};
+  transition: all 0.2s ease;
+`;
+
+const PowerLabel = styled.div`
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 500;
 `;
 
 export default function BrowserSynth() {
@@ -209,10 +274,28 @@ export default function BrowserSynth() {
   const startValue = useRef(0);
 
   // Initialize audio context on first user interaction
-  const initializeAudio = () => {
+  const initializeAudio = async () => {
     if (!audioContext.current) {
-      audioContext.current = new AudioContext();
-      setIsAudioReady(true);
+      try {
+        audioContext.current = new AudioContext({
+          latencyHint: 'interactive',
+          sampleRate: 44100,
+        });
+
+        // Create and connect a master gain node
+        const masterGain = audioContext.current.createGain();
+        masterGain.gain.value = 0.5; // Set a reasonable default volume
+        masterGain.connect(audioContext.current.destination);
+
+        // Resume the audio context (required for iOS)
+        if (audioContext.current.state === 'suspended') {
+          await audioContext.current.resume();
+        }
+
+        setIsAudioReady(true);
+      } catch (error) {
+        console.error('Failed to initialize audio:', error);
+      }
     }
   };
 
@@ -230,52 +313,65 @@ export default function BrowserSynth() {
     return baseFreq * Math.pow(2, octaveDiff);
   };
 
-  const startNote = (key: string, frequency: number) => {
-    if (!audioContext.current) {
-      initializeAudio();
+  const startNote = async (key: string, frequency: number) => {
+    if (!isAudioReady || !audioContext.current) return;
+
+    try {
+      // Ensure audio context is running
+      if (audioContext.current.state === 'suspended') {
+        await audioContext.current.resume();
+      }
+
+      const oscillator = audioContext.current.createOscillator();
+      const gainNode = audioContext.current.createGain();
+
+      oscillator.type = synthParams.waveform;
+      oscillator.frequency.setValueAtTime(frequency, audioContext.current.currentTime);
+
+      // Apply ADSR envelope
+      gainNode.gain.setValueAtTime(0, audioContext.current.currentTime);
+      gainNode.gain.linearRampToValueAtTime(
+        1,
+        audioContext.current.currentTime + synthParams.attack
+      );
+      gainNode.gain.linearRampToValueAtTime(
+        synthParams.sustain,
+        audioContext.current.currentTime + synthParams.attack + synthParams.decay
+      );
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.current.destination);
+
+      oscillator.start();
+      oscillators.current[key] = oscillator;
+      gainNodes.current[key] = gainNode;
+      setActiveKeys(prev => new Set([...prev, key]));
+    } catch (error) {
+      console.error('Failed to start note:', error);
     }
-
-    if (!audioContext.current) return;
-
-    const oscillator = audioContext.current.createOscillator();
-    const gainNode = audioContext.current.createGain();
-
-    oscillator.type = synthParams.waveform;
-    oscillator.frequency.setValueAtTime(frequency, audioContext.current.currentTime);
-
-    // Apply ADSR envelope
-    gainNode.gain.setValueAtTime(0, audioContext.current.currentTime);
-    gainNode.gain.linearRampToValueAtTime(1, audioContext.current.currentTime + synthParams.attack);
-    gainNode.gain.linearRampToValueAtTime(
-      synthParams.sustain,
-      audioContext.current.currentTime + synthParams.attack + synthParams.decay
-    );
-
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.current.destination);
-
-    oscillator.start();
-    oscillators.current[key] = oscillator;
-    gainNodes.current[key] = gainNode;
-    setActiveKeys(prev => new Set([...prev, key]));
   };
 
   const stopNote = (key: string) => {
-    if (oscillators.current[key] && gainNodes.current[key] && audioContext.current) {
-      const gainNode = gainNodes.current[key];
-      gainNode.gain.cancelScheduledValues(audioContext.current.currentTime);
-      gainNode.gain.setTargetAtTime(0, audioContext.current.currentTime, synthParams.release);
+    if (oscillators.current[key] && audioContext.current) {
+      const oscillator = oscillators.current[key];
 
-      setTimeout(() => {
-        oscillators.current[key].stop();
+      try {
+        // Immediately stop the oscillator
+        oscillator.stop();
+
+        // Clean up references
         delete oscillators.current[key];
         delete gainNodes.current[key];
+
+        // Update active keys state
         setActiveKeys(prev => {
           const newSet = new Set(prev);
           newSet.delete(key);
           return newSet;
         });
-      }, synthParams.release * 1000);
+      } catch (error) {
+        console.error('Failed to stop note:', error);
+      }
     }
   };
 
@@ -374,11 +470,82 @@ export default function BrowserSynth() {
     }
   };
 
+  const togglePower = async () => {
+    if (!isAudioReady) {
+      await initializeAudio();
+    } else {
+      try {
+        // Stop all oscillators immediately
+        Object.values(oscillators.current).forEach(osc => {
+          try {
+            osc.stop();
+          } catch (error) {
+            console.error('Failed to stop oscillator:', error);
+          }
+        });
+
+        // Clear all references
+        oscillators.current = {};
+        gainNodes.current = {};
+        setActiveKeys(new Set());
+
+        // Close audio context
+        if (audioContext.current) {
+          await audioContext.current.close();
+          audioContext.current = null;
+        }
+        setIsAudioReady(false);
+      } catch (error) {
+        console.error('Failed to toggle power:', error);
+      }
+    }
+  };
+
+  // Add cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // Stop all oscillators immediately
+      Object.values(oscillators.current).forEach(osc => {
+        try {
+          osc.stop();
+        } catch (error) {
+          console.error('Failed to stop oscillator:', error);
+        }
+      });
+
+      // Clear all references
+      oscillators.current = {};
+      gainNodes.current = {};
+      setActiveKeys(new Set());
+
+      // Close audio context
+      if (audioContext.current) {
+        audioContext.current.close();
+      }
+    };
+  }, []);
+
   return (
     <SynthContainer>
+      <PowerSwitch>
+        <PowerLabel>POWER</PowerLabel>
+        <SwitchContainer
+          onClick={togglePower}
+          onTouchStart={e => {
+            e.preventDefault();
+            togglePower();
+          }}
+        >
+          <SwitchButton $isOn={isAudioReady} />
+        </SwitchContainer>
+        <LED $isOn={isAudioReady} />
+      </PowerSwitch>
       {!isAudioReady && (
         <Instructions>
-          <p>Tap anywhere to start the synthesizer</p>
+          <p>Click the power switch to start the synthesizer</p>
+          <WarningMessage>
+            Note: On iOS devices, make sure your ringer switch is turned on to hear sound
+          </WarningMessage>
         </Instructions>
       )}
       <Controls>
@@ -457,8 +624,21 @@ export default function BrowserSynth() {
           <Key
             key={key}
             $isActive={activeKeys.has(key)}
-            onTouchStart={() => startNote(key, getFrequency(baseFreq))}
-            onTouchEnd={() => stopNote(key)}
+            onTouchStart={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              startNote(key, getFrequency(baseFreq));
+            }}
+            onTouchEnd={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              stopNote(key);
+            }}
+            onTouchCancel={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              stopNote(key);
+            }}
             onMouseDown={() => startNote(key, getFrequency(baseFreq))}
             onMouseUp={() => stopNote(key)}
             onMouseLeave={() => stopNote(key)}
@@ -472,6 +652,9 @@ export default function BrowserSynth() {
           <p>Tap the keys or use your keyboard (A-K) to play notes!</p>
           <p>Use the knobs to adjust the synth parameters</p>
           <p>Change octave with + and - buttons</p>
+          <WarningMessage>
+            If you can't hear sound on iOS, check that your ringer switch is on
+          </WarningMessage>
         </Instructions>
       )}
     </SynthContainer>
