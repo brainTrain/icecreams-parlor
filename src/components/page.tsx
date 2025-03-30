@@ -1,6 +1,7 @@
 import styled from 'styled-components';
 import BrowserSynth from './browser-synth';
 import DrumMachine from './drum-machine';
+import Chorus from './chorus';
 
 const PageContainer = styled.div`
   min-height: 100vh;
@@ -32,6 +33,9 @@ function Page() {
       </Section>
       <Section>
         <DrumMachine />
+      </Section>
+      <Section>
+        <Chorus />
       </Section>
     </PageContainer>
   );
