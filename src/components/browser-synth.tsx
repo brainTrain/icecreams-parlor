@@ -273,32 +273,6 @@ export default function BrowserSynth() {
   const startY = useRef(0);
   const startValue = useRef(0);
 
-  // Initialize audio context on first user interaction
-  const initializeAudio = async () => {
-    if (!audioContext.current) {
-      try {
-        audioContext.current = new AudioContext({
-          latencyHint: 'interactive',
-          sampleRate: 44100,
-        });
-
-        // Create and connect a master gain node
-        const masterGain = audioContext.current.createGain();
-        masterGain.gain.value = 0.5; // Set a reasonable default volume
-        masterGain.connect(audioContext.current.destination);
-
-        // Resume the audio context (required for iOS)
-        if (audioContext.current.state === 'suspended') {
-          await audioContext.current.resume();
-        }
-
-        setIsAudioReady(true);
-      } catch (error) {
-        console.error('Failed to initialize audio:', error);
-      }
-    }
-  };
-
   useEffect(() => {
     return () => {
       Object.values(oscillators.current).forEach(osc => osc.stop());
@@ -472,7 +446,33 @@ export default function BrowserSynth() {
 
   const togglePower = async () => {
     if (!isAudioReady) {
-      await initializeAudio();
+      try {
+        // Create audio context first
+        audioContext.current = new AudioContext({
+          latencyHint: 'interactive',
+          sampleRate: 44100,
+        });
+
+        // Create and connect a master gain node
+        const masterGain = audioContext.current.createGain();
+        masterGain.gain.value = 0.5;
+        masterGain.connect(audioContext.current.destination);
+
+        // Resume the audio context
+        if (audioContext.current.state === 'suspended') {
+          await audioContext.current.resume();
+        }
+
+        // Only set ready after successful initialization
+        setIsAudioReady(true);
+      } catch (error) {
+        console.error('Failed to initialize audio:', error);
+        // Clean up on failure
+        if (audioContext.current) {
+          await audioContext.current.close();
+          audioContext.current = null;
+        }
+      }
     } else {
       try {
         // Stop all oscillators immediately
@@ -533,6 +533,7 @@ export default function BrowserSynth() {
           onClick={togglePower}
           onTouchStart={e => {
             e.preventDefault();
+            e.stopPropagation();
             togglePower();
           }}
         >

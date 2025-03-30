@@ -1,5 +1,6 @@
 import styled from 'styled-components';
 import BrowserSynth from './browser-synth';
+import DrumMachine from './drum-machine';
 
 const PageContainer = styled.div`
   min-height: 100vh;
@@ -9,6 +10,7 @@ const PageContainer = styled.div`
   justify-content: center;
   background: #121212;
   padding: 2rem;
+  gap: 2rem;
 `;
 
 const Title = styled.h1`
@@ -16,11 +18,21 @@ const Title = styled.h1`
   margin-bottom: 2rem;
 `;
 
+const Section = styled.div`
+  width: 100%;
+  max-width: 800px;
+`;
+
 function Page() {
   return (
     <PageContainer>
       <Title>Browser Synth</Title>
-      <BrowserSynth />
+      <Section>
+        <BrowserSynth />
+      </Section>
+      <Section>
+        <DrumMachine />
+      </Section>
     </PageContainer>
   );
 }
