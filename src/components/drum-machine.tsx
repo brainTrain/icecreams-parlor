@@ -7,15 +7,6 @@ interface DrumPadProps {
   $isActive: boolean;
 }
 
-const DRUM_SOUNDS = {
-  kick: 'https://raw.githubusercontent.com/braintrain/icecreams-parlor/main/public/sounds/kick.mp3',
-  snare:
-    'https://raw.githubusercontent.com/braintrain/icecreams-parlor/main/public/sounds/snare.mp3',
-  hihat:
-    'https://raw.githubusercontent.com/braintrain/icecreams-parlor/main/public/sounds/hihat.mp3',
-  clap: 'https://raw.githubusercontent.com/braintrain/icecreams-parlor/main/public/sounds/clap.mp3',
-};
-
 const DrumMachineContainer = styled.div`
   display: flex;
   flex-direction: column;
