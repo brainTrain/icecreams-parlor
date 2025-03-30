@@ -26,15 +26,19 @@ const SynthContainer = styled.div`
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 2rem;
+  padding: 1rem;
   background: #1a1a1a;
   border-radius: 12px;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
 `;
 
 const Controls = styled.div`
   display: flex;
-  gap: 2rem;
+  flex-wrap: wrap;
+  gap: 1rem;
   margin-bottom: 2rem;
   padding: 1rem;
   background: #2a2a2a;
@@ -48,12 +52,13 @@ const ControlGroup = styled.div`
   flex-direction: column;
   align-items: center;
   gap: 0.5rem;
+  min-width: 80px;
 `;
 
 const KnobContainer = styled.div`
   position: relative;
-  width: 80px;
-  height: 80px;
+  width: 60px;
+  height: 60px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -68,14 +73,15 @@ const KnobValue = styled.div`
 `;
 
 const Knob = styled.div<{ $value: number; $isDragging?: boolean }>`
-  width: 80px;
-  height: 80px;
+  width: 60px;
+  height: 60px;
   border-radius: 50%;
   background: ${props => (props.$isDragging ? '#4a4a4a' : '#3a3a3a')};
   position: relative;
   cursor: pointer;
   box-shadow: ${props => (props.$isDragging ? '0 0 10px rgba(255,255,255,0.2)' : 'none')};
   transition: background 0.2s ease;
+  touch-action: none;
 
   &::before {
     content: '';
@@ -83,7 +89,7 @@ const Knob = styled.div<{ $value: number; $isDragging?: boolean }>`
     top: 50%;
     left: 50%;
     width: 4px;
-    height: 35px;
+    height: 25px;
     background: #fff;
     transform-origin: bottom center;
     transform: translate(-50%, -100%) rotate(${props => props.$value * 270}deg);
@@ -94,8 +100,8 @@ const Knob = styled.div<{ $value: number; $isDragging?: boolean }>`
     position: absolute;
     top: 50%;
     left: 50%;
-    width: 60px;
-    height: 60px;
+    width: 45px;
+    height: 45px;
     border: 2px solid rgba(255, 255, 255, 0.1);
     border-radius: 50%;
     transform: translate(-50%, -50%);
@@ -131,28 +137,39 @@ const OctaveButton = styled.button`
 
 const Keyboard = styled.div`
   display: flex;
-  gap: 0.5rem;
+  gap: 0.25rem;
   margin-bottom: 2rem;
+  width: 100%;
+  overflow-x: auto;
+  padding: 0.5rem;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 `;
 
 const Key = styled.button<{ $isActive?: boolean }>`
-  width: 60px;
-  height: 200px;
+  width: 45px;
+  height: 150px;
   background: ${props =>
     props.$isActive
       ? 'linear-gradient(to bottom, #e0e0e0, #d0d0d0)'
       : 'linear-gradient(to bottom, #ffffff, #f0f0f0)'};
   border: 1px solid #ddd;
-  border-radius: 8px;
-  font-size: 1.2rem;
+  border-radius: 6px;
+  font-size: 1rem;
   color: #333;
   cursor: pointer;
   transition: all 0.1s ease;
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  padding-bottom: 1rem;
+  padding-bottom: 0.5rem;
   transform: ${props => (props.$isActive ? 'translateY(2px)' : 'none')};
+  touch-action: none;
 
   &:hover {
     background: linear-gradient(to bottom, #f0f0f0, #e0e0e0);
@@ -184,14 +201,22 @@ export default function BrowserSynth() {
     sustain: 0.7,
     release: 0.2,
   });
+  const [isAudioReady, setIsAudioReady] = useState(false);
 
   const [draggingKnob, setDraggingKnob] = useState<keyof SynthParams | null>(null);
   const knobRefs = useRef<{ [key: string]: HTMLDivElement }>({});
   const startY = useRef(0);
   const startValue = useRef(0);
 
+  // Initialize audio context on first user interaction
+  const initializeAudio = () => {
+    if (!audioContext.current) {
+      audioContext.current = new AudioContext();
+      setIsAudioReady(true);
+    }
+  };
+
   useEffect(() => {
-    audioContext.current = new AudioContext();
     return () => {
       Object.values(oscillators.current).forEach(osc => osc.stop());
       if (audioContext.current) {
@@ -206,6 +231,10 @@ export default function BrowserSynth() {
   };
 
   const startNote = (key: string, frequency: number) => {
+    if (!audioContext.current) {
+      initializeAudio();
+    }
+
     if (!audioContext.current) return;
 
     const oscillator = audioContext.current.createOscillator();
@@ -347,6 +376,11 @@ export default function BrowserSynth() {
 
   return (
     <SynthContainer>
+      {!isAudioReady && (
+        <Instructions>
+          <p>Tap anywhere to start the synthesizer</p>
+        </Instructions>
+      )}
       <Controls>
         <ControlGroup>
           <KnobLabel>Waveform</KnobLabel>
@@ -423,6 +457,8 @@ export default function BrowserSynth() {
           <Key
             key={key}
             $isActive={activeKeys.has(key)}
+            onTouchStart={() => startNote(key, getFrequency(baseFreq))}
+            onTouchEnd={() => stopNote(key)}
             onMouseDown={() => startNote(key, getFrequency(baseFreq))}
             onMouseUp={() => stopNote(key)}
             onMouseLeave={() => stopNote(key)}
@@ -431,11 +467,13 @@ export default function BrowserSynth() {
           </Key>
         ))}
       </Keyboard>
-      <Instructions>
-        <p>Click the keys or use your keyboard (A-K) to play notes!</p>
-        <p>Use the knobs to adjust the synth parameters</p>
-        <p>Change octave with + and - buttons</p>
-      </Instructions>
+      {isAudioReady && (
+        <Instructions>
+          <p>Tap the keys or use your keyboard (A-K) to play notes!</p>
+          <p>Use the knobs to adjust the synth parameters</p>
+          <p>Change octave with + and - buttons</p>
+        </Instructions>
+      )}
     </SynthContainer>
   );
 }
