@@ -29,21 +29,23 @@ const Controls = styled.div`
 const NoteButton = styled.button<{ $isActive: boolean }>`
   width: 60px;
   height: 60px;
-  background: ${props => (props.$isActive ? '#4a4a4a' : '#3a3a3a')};
-  border: none;
+  background: ${props => (props.$isActive ? '#4CAF50' : '#3a3a3a')};
+  border: ${props => (props.$isActive ? '3px solid #ffffff' : 'none')};
   border-radius: 8px;
-  color: white;
-  font-size: 1.2rem;
+  color: ${props => (props.$isActive ? '#ffffff' : '#cccccc')};
+  font-size: ${props => (props.$isActive ? '1.5rem' : '1.2rem')};
   font-weight: bold;
   cursor: pointer;
-  transition: all 0.1s ease;
+  transition: all 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
   text-transform: uppercase;
+  box-shadow: ${props => (props.$isActive ? '0 0 15px rgba(76, 175, 80, 0.8)' : 'none')};
+  transform: ${props => (props.$isActive ? 'scale(1.1)' : 'scale(1)')};
 
   &:hover {
-    background: #4a4a4a;
+    background: ${props => (props.$isActive ? '#4CAF50' : '#4a4a4a')};
   }
 `;
 
