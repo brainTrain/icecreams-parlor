@@ -57,6 +57,8 @@ const WhiteKey = styled.button<{ $isActive: boolean }>`
   padding-bottom: 10px;
   font-weight: bold;
   font-size: 1.1rem;
+  user-select: none;
+  touch-action: none;
 
   &:hover {
     background: ${props => (props.$isActive ? '#4CAF50' : '#f0f0f0')};
@@ -85,6 +87,8 @@ const BlackKey = styled.button<{ $isActive: boolean; $leftOffset: number }>`
   padding-bottom: 5px;
   font-weight: bold;
   font-size: 0.9rem;
+  user-select: none;
+  touch-action: none;
 
   &:hover {
     background: ${props => (props.$isActive ? '#4CAF50' : '#333333')};
@@ -94,11 +98,13 @@ const BlackKey = styled.button<{ $isActive: boolean; $leftOffset: number }>`
 const NoteLabel = styled.div`
   font-size: 1rem;
   margin-bottom: 2px;
+  user-select: none;
 `;
 
 const OctaveLabel = styled.div`
   font-size: 0.8rem;
   opacity: 0.8;
+  user-select: none;
 `;
 
 const ToneControl = styled.div`
@@ -259,10 +265,12 @@ const OctaveDisplay = styled.div`
 
 interface ToneMessage {
   type: 'tone';
-  note: string | null;
+  note: string;
   oscillatorType: string;
   peerId: string;
-  octave?: number; // Add octave to the message interface
+  octave?: number;
+  action: 'press' | 'release';
+  noteId?: string;
 }
 
 // Create a single PeerJS instance outside the component
@@ -355,7 +363,7 @@ const BLACK_KEYS = ['C♯', 'D♯', 'F♯', 'G♯', 'A♯'];
 export default function Chorus() {
   const [isConnected, setIsConnected] = useState(false);
   const [isSoundEnabled, setIsSoundEnabled] = useState(false);
-  const [selectedNote, setSelectedNote] = useState<string | null>(null);
+  const [activeNotes, setActiveNotes] = useState<Map<string, string>>(new Map());
   const [selectedTone, setSelectedTone] = useState<string>('sine');
   const [activeTones, setActiveTones] = useState<Map<string, ToneMessage>>(new Map());
   const [status, setStatus] = useState<string>('Initializing...');
@@ -363,10 +371,8 @@ export default function Chorus() {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [audioContextState, setAudioContextState] = useState<string>('not created');
   const soundEnabledRef = useRef<boolean>(false);
-  const isUserScrolledUpRef = useRef<boolean>(false);
   const [connectionCount, setConnectionCount] = useState<number>(0);
   const [currentOctave, setCurrentOctave] = useState<number>(4);
-  // Add state for showing flats instead of sharps
   const [showFlats, setShowFlats] = useState<boolean>(false);
 
   const peerRef = useRef<Peer | null>(null);
@@ -374,6 +380,9 @@ export default function Chorus() {
   const audioContext = useRef<AudioContext | null>(null);
   const oscillators = useRef<Map<string, OscillatorNode>>(new Map());
   const gainNodes = useRef<Map<string, GainNode>>(new Map());
+
+  // Add state to track if mouse/touch is down
+  const [isPointerDown, setIsPointerDown] = useState(false);
 
   // Initialize PeerJS and handle connections
   useEffect(() => {
@@ -595,13 +604,14 @@ export default function Chorus() {
       });
 
       // When connected, send our current state if we have a note active
-      if (selectedNote && peerRef.current) {
+      if (selectedTone && peerRef.current) {
         const initMessage: ToneMessage = {
           type: 'tone',
-          note: selectedNote,
+          note: selectedTone,
           oscillatorType: selectedTone,
           peerId: peerRef.current.id,
           octave: currentOctave,
+          action: 'press',
         };
 
         console.log('Sending initial state to new connection:', initMessage);
@@ -655,13 +665,14 @@ export default function Chorus() {
       console.log('Connection opened with', conn.peer);
 
       // When connected, send our current state if we have a note active
-      if (selectedNote && peerRef.current) {
+      if (selectedTone && peerRef.current) {
         const initMessage: ToneMessage = {
           type: 'tone',
-          note: selectedNote,
+          note: selectedTone,
           oscillatorType: selectedTone,
           peerId: peerRef.current.id,
           octave: currentOctave,
+          action: 'press',
         };
 
         console.log('Sending initial state to new connection:', initMessage);
@@ -706,15 +717,15 @@ export default function Chorus() {
     });
   };
 
-  // Modify playTone to use octave in frequency calculation
+  // Update playTone to use noteId for identification
   const playTone = (
-    peerId: string,
+    noteId: string,
     note: string,
     oscillatorType: string,
     octave: number = currentOctave
   ) => {
     console.log(
-      `► Playing tone - Peer: ${peerId}, Note: ${note}, Type: ${oscillatorType}, Octave: ${octave}`
+      `► Playing tone - ID: ${noteId}, Note: ${note}, Type: ${oscillatorType}, Octave: ${octave}`
     );
 
     if (!audioContext.current || !isSoundEnabled) {
@@ -731,12 +742,12 @@ export default function Chorus() {
       return;
     }
 
-    // Stop any existing tone from this peer
-    stopTone(peerId);
+    // Stop any existing tone with this noteId
+    stopTone(noteId);
 
     try {
       console.log(
-        `Creating oscillator for ${peerId}, note: ${note}, type: ${oscillatorType}, octave: ${octave}`
+        `Creating oscillator for ${noteId}, note: ${note}, type: ${oscillatorType}, octave: ${octave}`
       );
 
       // Make sure we have a master gain node
@@ -748,12 +759,12 @@ export default function Chorus() {
         gainNodes.current.set('master', masterGain);
       }
 
-      // Create peer-specific gain node if needed
-      if (!gainNodes.current.has(peerId)) {
+      // Create note-specific gain node if needed
+      if (!gainNodes.current.has(noteId)) {
         const peerGain = audioContext.current.createGain();
-        peerGain.gain.value = 0.4;
+        peerGain.gain.value = 0.3; // Slightly lower gain when playing multiple notes
         peerGain.connect(gainNodes.current.get('master')!);
-        gainNodes.current.set(peerId, peerGain);
+        gainNodes.current.set(noteId, peerGain);
       }
 
       // Create and configure oscillator
@@ -794,12 +805,12 @@ export default function Chorus() {
       oscillator.frequency.setValueAtTime(frequency, audioContext.current.currentTime);
 
       // Connect and start the oscillator
-      oscillator.connect(gainNodes.current.get(peerId)!);
+      oscillator.connect(gainNodes.current.get(noteId)!);
       oscillator.start();
-      console.log(`Started oscillator for ${peerId}`);
+      console.log(`Started oscillator for ${noteId}`);
 
       // Store the oscillator
-      oscillators.current.set(peerId, oscillator);
+      oscillators.current.set(noteId, oscillator);
     } catch (e) {
       console.error('Error playing tone:', e);
     }
@@ -924,15 +935,15 @@ export default function Chorus() {
     }
   };
 
-  // Also update the remote tone function to use octave
+  // Also update playRemoteTone with noteId
   const playRemoteTone = async (
-    remoteId: string,
+    noteId: string,
     note: string,
     oscillatorType: string,
     octave: number = currentOctave
   ) => {
     console.log(
-      `🔊 REMOTE TONE: Playing ${note} with ${oscillatorType} for ${remoteId}, Octave: ${octave}`
+      `🔊 REMOTE TONE: Playing ${note} with ${oscillatorType} for ${noteId}, Octave: ${octave}`
     );
 
     // Check if sound is enabled directly
@@ -957,7 +968,7 @@ export default function Chorus() {
       try {
         await audioContext.current.resume();
         // Retry after forcing resume
-        setTimeout(() => playRemoteTone(remoteId, note, oscillatorType, octave), 100);
+        setTimeout(() => playRemoteTone(noteId, note, oscillatorType, octave), 100);
         return;
       } catch (err) {
         console.error('Failed to resume AudioContext for remote tone:', err);
@@ -966,8 +977,8 @@ export default function Chorus() {
     }
 
     try {
-      // Stop any existing tone first
-      stopTone(remoteId);
+      // Stop any existing tone with this ID
+      stopTone(noteId);
 
       // Create a new oscillator
       const osc = audioContext.current.createOscillator();
@@ -1011,64 +1022,90 @@ export default function Chorus() {
       if (!gainNodes.current.has('master')) {
         console.log('Creating master gain node for remote tone');
         const masterGain = audioContext.current.createGain();
-        masterGain.gain.value = 0.7; // Even louder
+        masterGain.gain.value = 0.7;
         masterGain.connect(audioContext.current.destination);
         gainNodes.current.set('master', masterGain);
       }
 
-      // Create or reuse a gain node for this remote
-      if (!gainNodes.current.has(remoteId)) {
+      // Create or reuse a gain node for this note
+      if (!gainNodes.current.has(noteId)) {
         const gain = audioContext.current.createGain();
-        gain.gain.value = 0.8; // Even louder for remote tones for better audibility
+        gain.gain.value = 0.6; // Slightly lower gain for multiple notes
         gain.connect(gainNodes.current.get('master')!);
-        gainNodes.current.set(remoteId, gain);
+        gainNodes.current.set(noteId, gain);
       }
 
       // Connect and start
-      osc.connect(gainNodes.current.get(remoteId)!);
+      osc.connect(gainNodes.current.get(noteId)!);
       osc.start();
-      console.log(`🎹 STARTED remote oscillator for ${remoteId}`);
+      console.log(`🎹 STARTED remote oscillator for ${noteId}`);
 
       // Store the oscillator
-      oscillators.current.set(remoteId, osc);
+      oscillators.current.set(noteId, osc);
     } catch (e) {
       console.error('Error playing remote tone:', e);
     }
   };
 
-  // Update the handleNoteClick function to ensure only one note can be active at a time
-  const handleNoteClick = (note: string, event?: React.MouseEvent) => {
+  // Update touch handlers to track pointer state
+  const handlePointerDown = (_: React.MouseEvent | React.TouchEvent) => {
+    setIsPointerDown(true);
+    // Add listeners to detect when pointer is released outside the keyboard
+    document.addEventListener('mouseup', handleGlobalPointerUp, { once: true });
+    document.addEventListener('touchend', handleGlobalPointerUp, { once: true });
+  };
+
+  const handleGlobalPointerUp = () => {
+    setIsPointerDown(false);
+  };
+
+  // Update handleNotePress to track pointer state
+  const handleNotePress = (note: string, event?: React.MouseEvent | React.TouchEvent) => {
     // Stop propagation to prevent clicks from affecting keys underneath
     if (event) {
       event.stopPropagation();
+      // Set pointer down state
+      setIsPointerDown(true);
     }
 
-    console.log('Note clicked:', note);
-
-    // If we're clicking the currently selected note, toggle it off
-    // Otherwise, change to the new note (and turn off any previous note)
-    const newSelectedNote = selectedNote === note ? null : note;
-    setSelectedNote(newSelectedNote);
+    console.log('Note pressed:', note);
 
     if (!peerRef.current) {
       console.error('Cannot send tone update: peer is null');
       return;
     }
 
-    // Create the message with octave
+    // Generate a unique ID for this note instance
+    const noteId = `${peerRef.current.id}-${note}-${currentOctave}`;
+
+    // If note is already active, do nothing
+    if (activeNotes.has(noteId)) {
+      return;
+    }
+
+    // Add to active notes
+    setActiveNotes(prev => {
+      const newMap = new Map(prev);
+      newMap.set(noteId, note);
+      return newMap;
+    });
+
+    // Create the message with action = press
     const message: ToneMessage = {
       type: 'tone',
-      note: newSelectedNote,
+      note: note,
       oscillatorType: selectedTone,
       peerId: peerRef.current.id,
       octave: currentOctave,
+      action: 'press',
+      noteId: noteId,
     };
 
     // Record this in our own note event history
     const noteEvent: NoteEventData = {
       type: 'noteEvent',
-      action: newSelectedNote ? 'play' : 'stop',
-      note: newSelectedNote,
+      action: 'play',
+      note: note,
       oscillatorType: selectedTone,
       peerId: peerRef.current.id,
       timestamp: Date.now(),
@@ -1081,16 +1118,11 @@ export default function Chorus() {
       return newEvents;
     });
 
-    console.log('Sending message:', message);
+    console.log('Sending press message:', message);
 
     // IMPORTANT: Play locally regardless of role
-    if (newSelectedNote) {
-      console.log('Playing note locally:', newSelectedNote);
-      playTone('local-' + peerRef.current.id, newSelectedNote, selectedTone, currentOctave);
-    } else {
-      console.log('Stopping local note');
-      stopTone('local-' + peerRef.current.id);
-    }
+    console.log('Playing note locally:', note);
+    playTone('local-' + noteId, note, selectedTone, currentOctave);
 
     // If we're the CHORUS, handle the message locally through the same event flow
     if (peerRef.current.id === ROOM_ID) {
@@ -1098,14 +1130,185 @@ export default function Chorus() {
       processIncomingMessage(message);
     }
 
-    console.log('Number of connections:', connections.current.size);
-    console.log('Connection keys:', [...connections.current.keys()]);
+    // Send to all connections
+    sendMessageToConnections(message);
+  };
+
+  // Update handleNoteRelease to track pointer state
+  const handleNoteRelease = (note: string, event?: React.MouseEvent | React.TouchEvent) => {
+    // Stop propagation to prevent events from affecting keys underneath
+    if (event) {
+      event.stopPropagation();
+    }
+
+    console.log('Note released:', note);
+
+    if (!peerRef.current) {
+      console.error('Cannot send tone update: peer is null');
+      return;
+    }
+
+    // Get the noteId for this note
+    const noteId = `${peerRef.current.id}-${note}-${currentOctave}`;
+
+    // If note is not active, do nothing
+    if (!activeNotes.has(noteId)) {
+      return;
+    }
+
+    // Remove from active notes
+    setActiveNotes(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(noteId);
+      return newMap;
+    });
+
+    // Create the message with action = release
+    const message: ToneMessage = {
+      type: 'tone',
+      note: note,
+      oscillatorType: selectedTone,
+      peerId: peerRef.current.id,
+      octave: currentOctave,
+      action: 'release',
+      noteId: noteId,
+    };
+
+    // Record this in our own note event history
+    const noteEvent: NoteEventData = {
+      type: 'noteEvent',
+      action: 'stop',
+      note: note,
+      oscillatorType: selectedTone,
+      peerId: peerRef.current.id,
+      timestamp: Date.now(),
+      octave: currentOctave,
+    };
+
+    setNoteEvents(prev => {
+      // Keep only the most recent 50 events
+      const newEvents = [...prev, noteEvent].slice(-50);
+      return newEvents;
+    });
+
+    console.log('Sending release message:', message);
+
+    // IMPORTANT: Stop note locally regardless of role
+    console.log('Stopping local note:', note);
+    stopTone('local-' + noteId);
+
+    // If we're the CHORUS, handle the message locally through the same event flow
+    if (peerRef.current.id === ROOM_ID) {
+      console.log('I am CHORUS, processing message locally');
+      processIncomingMessage(message);
+    }
 
     // Send to all connections
+    sendMessageToConnections(message);
+  };
+
+  // Add handlers for dragging across keys
+  const handleNoteEnter = (note: string, event: React.MouseEvent | React.TouchEvent) => {
+    // Only trigger if pointer is already down (dragging)
+    if (isPointerDown) {
+      // Get the current active notes that belong to this user
+      const currentUserNotes = new Map();
+      activeNotes.forEach((noteValue, noteId) => {
+        if (noteId.startsWith(`${peerRef.current?.id}`)) {
+          currentUserNotes.set(noteId, noteValue);
+        }
+      });
+
+      // Release all other currently playing notes before playing the new one
+      currentUserNotes.forEach((_, noteId) => {
+        const noteParts = noteId.split('-');
+        const noteToRelease = noteParts[1];
+        if (noteToRelease !== note) {
+          handleNoteRelease(noteToRelease);
+        }
+      });
+
+      // Play the new note
+      handleNotePress(note, event);
+    }
+  };
+
+  // Add handlers for mouse/touch interactions
+  const handleTouchStart = (note: string, event: React.TouchEvent) => {
+    event.preventDefault(); // Prevent default to avoid double events
+    handlePointerDown(event);
+    handleNotePress(note, event);
+  };
+
+  const handleTouchEnd = (note: string, event: React.TouchEvent) => {
+    event.preventDefault(); // Prevent default to avoid double events
+    setIsPointerDown(false);
+    handleNoteRelease(note, event);
+  };
+
+  // Update the touch move handler to fix the unused variable
+  const handleTouchMove = (event: React.TouchEvent) => {
+    if (!isPointerDown) return;
+
+    event.preventDefault();
+
+    // Get the element under the touch point
+    const touch = event.touches[0];
+    const element = document.elementFromPoint(touch.clientX, touch.clientY);
+
+    // Get the current active notes that belong to this user
+    const currentUserNotes = new Map();
+    activeNotes.forEach((noteValue, noteId) => {
+      if (noteId.startsWith(`${peerRef.current?.id}`)) {
+        currentUserNotes.set(noteId, noteValue);
+      }
+    });
+
+    // Check if it's a key and extract the note
+    if (element && (element.closest('[data-note]') || element.hasAttribute('data-note'))) {
+      const keyElement = element.closest('[data-note]') || element;
+      const note = keyElement.getAttribute('data-note');
+
+      if (note) {
+        // Release all other currently playing notes before playing the new one
+        currentUserNotes.forEach((_, noteId) => {
+          const noteParts = noteId.split('-');
+          const noteToRelease = noteParts[1];
+          if (noteToRelease !== note) {
+            handleNoteRelease(noteToRelease);
+          }
+        });
+
+        // Play this note if it's not already playing
+        if (!isNoteActive(note)) {
+          handleNotePress(note, event);
+        }
+      }
+    } else {
+      // If not over any key, release all notes
+      currentUserNotes.forEach((_, noteId) => {
+        const noteParts = noteId.split('-');
+        const noteToRelease = noteParts[1];
+        handleNoteRelease(noteToRelease);
+      });
+    }
+  };
+
+  // Update mouseLeave to always release notes during drag
+  const handleMouseLeave = (note: string, event: React.MouseEvent) => {
+    if (isNoteActive(note)) {
+      handleNoteRelease(note, event);
+    }
+  };
+
+  // Helper function to send messages to all connections
+  const sendMessageToConnections = (message: ToneMessage) => {
+    console.log('Number of connections:', connections.current.size);
+
     if (connections.current.size === 0) {
       console.log('No active connections to send to');
       // Don't try to reconnect if we're the CHORUS room
-      if (peerRef.current.id !== ROOM_ID) {
+      if (peerRef.current?.id !== ROOM_ID) {
         setStatus('No connections available. Trying to reconnect...');
         connectToChorus();
       } else {
@@ -1117,7 +1320,7 @@ export default function Chorus() {
     let messagesSent = 0;
     connections.current.forEach((conn, id) => {
       if (conn.open) {
-        console.log('Trying to send tone update to:', id);
+        console.log('Trying to send update to:', id);
         try {
           conn.send(message);
           console.log('Message sent successfully to:', id);
@@ -1134,49 +1337,7 @@ export default function Chorus() {
     console.log(`Sent message to ${messagesSent} connections`);
   };
 
-  // Improved scroll handler that uses refs
-  const handleChatScroll = () => {
-    if (!chatContainerRef.current) return;
-
-    const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
-    // Use a larger tolerance (30px) to determine if at bottom
-    const isAtBottom = Math.abs(scrollHeight - scrollTop - clientHeight) < 30;
-
-    // Store scroll position directly in ref for immediate access
-    isUserScrolledUpRef.current = !isAtBottom;
-
-    console.log(`Chat scroll position: ${isAtBottom ? 'at bottom' : 'scrolled up'}`);
-  };
-
-  // Add scroll event listener
-  useEffect(() => {
-    const chatContainer = chatContainerRef.current;
-    if (chatContainer) {
-      chatContainer.addEventListener('scroll', handleChatScroll);
-    }
-
-    return () => {
-      if (chatContainer) {
-        chatContainer.removeEventListener('scroll', handleChatScroll);
-      }
-    };
-  }, []);
-
-  // Add a dedicated effect to handle scrolling whenever noteEvents changes
-  useEffect(() => {
-    // Only auto-scroll if the user hasn't manually scrolled up
-    if (!isUserScrolledUpRef.current && chatContainerRef.current) {
-      // Use requestAnimationFrame for smoother scrolling and to ensure DOM is ready
-      requestAnimationFrame(() => {
-        if (chatContainerRef.current) {
-          chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-          console.log('Auto-scrolled chat to bottom');
-        }
-      });
-    }
-  }, [noteEvents]); // This will run whenever noteEvents changes
-
-  // Update the processIncomingMessage function to remove manual scrolling
+  // Update processIncomingMessage to handle press/release actions
   const processIncomingMessage = (data: any) => {
     console.log('Processing message:', data);
 
@@ -1193,10 +1354,13 @@ export default function Chorus() {
       // Get the octave from the message or use default
       const noteOctave = toneData.octave || 4;
 
+      // Ensure we have a noteId
+      const noteId = toneData.noteId || `remote-${toneData.peerId}-${toneData.note}-${noteOctave}`;
+
       // Record this note event in history
       const noteEvent: NoteEventData = {
         type: 'noteEvent',
-        action: toneData.note ? 'play' : 'stop',
+        action: toneData.action === 'press' ? 'play' : 'stop',
         note: toneData.note,
         oscillatorType: toneData.oscillatorType,
         peerId: toneData.peerId,
@@ -1209,18 +1373,14 @@ export default function Chorus() {
         return newEvents;
       });
 
-      // No need for manual scrolling here - the useEffect will handle it
-
-      const remoteId = 'remote-' + toneData.peerId;
-
-      // Update the active tones
-      if (toneData.note) {
-        console.log('📣 Adding/updating remote tone for', toneData.peerId);
+      // Update the active tones based on action
+      if (toneData.action === 'press') {
+        console.log('📣 Adding/updating remote tone for', toneData.peerId, toneData.note);
 
         // Add or update the tone
         setActiveTones(prev => {
           const newMap = new Map(prev);
-          newMap.set(toneData.peerId, toneData);
+          newMap.set(noteId, toneData);
           return newMap;
         });
 
@@ -1243,21 +1403,22 @@ export default function Chorus() {
             'with note',
             toneData.note
           );
-          void playRemoteTone(remoteId, toneData.note, toneData.oscillatorType, noteOctave);
+          void playRemoteTone(noteId, toneData.note, toneData.oscillatorType, noteOctave);
         } else {
           console.log('❌ Sound disabled, not playing remote tone');
         }
-      } else {
-        console.log('❌ Removing tone for', toneData.peerId);
+      } else if (toneData.action === 'release') {
+        console.log('❌ Removing tone for', toneData.peerId, toneData.note);
+
         // Remove the tone
         setActiveTones(prev => {
           const newMap = new Map(prev);
-          newMap.delete(toneData.peerId);
+          newMap.delete(noteId);
           return newMap;
         });
 
         // Stop the tone
-        stopTone(remoteId);
+        stopTone(noteId);
       }
     } else if (data.type === 'system') {
       console.log('Received system message:', data);
@@ -1275,8 +1436,6 @@ export default function Chorus() {
         };
         return [...prev, systemEvent].slice(-50);
       });
-
-      // No need for manual scrolling here - the useEffect will handle it
     }
   };
 
@@ -1284,8 +1443,8 @@ export default function Chorus() {
     setSelectedTone(tone);
 
     // If we have a note selected, update the tone
-    if (selectedNote) {
-      handleNoteClick(selectedNote);
+    if (selectedTone) {
+      handleNotePress(selectedTone);
     }
   };
 
@@ -1317,50 +1476,37 @@ export default function Chorus() {
     return () => clearInterval(interval);
   }, []);
 
-  // Update function to change octave and restart currently playing note
+  // Modify changeOctave to update all currently playing notes when octave changes
   const changeOctave = (delta: number) => {
     setCurrentOctave(prev => {
       // Limit octave range between 1 and 7
       const newOctave = Math.max(1, Math.min(7, prev + delta));
       console.log(`Changing octave from ${prev} to ${newOctave}`);
 
-      // If a note is currently playing, restart it at the new octave
-      if (selectedNote && peerRef.current) {
-        console.log(`Restarting note ${selectedNote} at octave ${newOctave}`);
+      if (prev !== newOctave && peerRef.current) {
+        // Stop all currently playing notes at the old octave
+        activeNotes.forEach((note, noteId) => {
+          stopTone('local-' + noteId);
 
-        // First stop the current note
-        stopTone('local-' + peerRef.current.id);
-
-        // Then play the note at the new octave
-        setTimeout(() => {
-          // Check if peer reference is still valid
-          if (!peerRef.current) return;
-
-          playTone('local-' + peerRef.current.id, selectedNote, selectedTone, newOctave);
-
-          // Also send a new message to peers
-          if (connections.current.size > 0) {
-            const message: ToneMessage = {
+          // Create a release message for each active note
+          if (peerRef.current) {
+            const releaseMessage: ToneMessage = {
               type: 'tone',
-              note: selectedNote,
+              note: note,
               oscillatorType: selectedTone,
-              peerId: peerRef.current.id, // This is safe now with the check above
-              octave: newOctave,
+              peerId: peerRef.current.id,
+              octave: prev, // old octave
+              action: 'release',
+              noteId: noteId,
             };
 
-            // Send the message to all connected peers
-            connections.current.forEach((conn, id) => {
-              if (conn.open) {
-                console.log('Sending octave change to:', id);
-                try {
-                  conn.send(message);
-                } catch (err) {
-                  console.error('Error sending octave change to', id, err);
-                }
-              }
-            });
+            // Send release message for each note
+            sendMessageToConnections(releaseMessage);
           }
-        }, 50); // Small delay to ensure note is fully stopped
+        });
+
+        // Clear active notes
+        setActiveNotes(new Map());
       }
 
       return newOctave;
@@ -1380,8 +1526,14 @@ export default function Chorus() {
     return note;
   };
 
+  const isNoteActive = (note: string) => {
+    // Check if the specific note at the current octave is active
+    const noteId = peerRef.current ? `${peerRef.current.id}-${note}-${currentOctave}` : '';
+    return activeNotes.has(noteId);
+  };
+
   return (
-    <ChorusContainer>
+    <ChorusContainer onTouchMove={handleTouchMove}>
       {/* Add prominent sound info message for iOS */}
       <div
         style={{
@@ -1462,8 +1614,20 @@ export default function Chorus() {
           {WHITE_KEYS.map(note => (
             <WhiteKey
               key={note}
-              $isActive={selectedNote === note}
-              onClick={e => handleNoteClick(note, e)}
+              data-note={note}
+              $isActive={isNoteActive(note)}
+              onMouseDown={e => {
+                handlePointerDown(e);
+                handleNotePress(note, e);
+              }}
+              onMouseUp={e => {
+                setIsPointerDown(false);
+                handleNoteRelease(note, e);
+              }}
+              onMouseEnter={e => handleNoteEnter(note, e)}
+              onMouseLeave={e => handleMouseLeave(note, e)}
+              onTouchStart={e => handleTouchStart(note, e)}
+              onTouchEnd={e => handleTouchEnd(note, e)}
             >
               <NoteLabel>{note}</NoteLabel>
               <OctaveLabel>{currentOctave}</OctaveLabel>
@@ -1474,9 +1638,21 @@ export default function Chorus() {
           {BLACK_KEYS.map(note => (
             <BlackKey
               key={note}
-              $isActive={selectedNote === note}
+              data-note={note}
+              $isActive={isNoteActive(note)}
               $leftOffset={BLACK_KEY_POSITIONS[note as keyof typeof BLACK_KEY_POSITIONS]}
-              onClick={e => handleNoteClick(note, e)}
+              onMouseDown={e => {
+                handlePointerDown(e);
+                handleNotePress(note, e);
+              }}
+              onMouseUp={e => {
+                setIsPointerDown(false);
+                handleNoteRelease(note, e);
+              }}
+              onMouseEnter={e => handleNoteEnter(note, e)}
+              onMouseLeave={e => handleMouseLeave(note, e)}
+              onTouchStart={e => handleTouchStart(note, e)}
+              onTouchEnd={e => handleTouchEnd(note, e)}
             >
               <NoteLabel>{displayNote(note)}</NoteLabel>
               <OctaveLabel>{currentOctave}</OctaveLabel>
