@@ -28,12 +28,8 @@ function Page() {
   return (
     <PageContainer>
       <Title>Browser Synth</Title>
-      <Section>
-        <BrowserSynth />
-      </Section>
-      <Section>
-        <DrumMachine />
-      </Section>
+      <Section>{/* <BrowserSynth /> */}</Section>
+      <Section>{/* <DrumMachine /> */}</Section>
       <Section>
         <Chorus />
       </Section>
