@@ -59,13 +59,7 @@ const WhiteKey = styled.button<{ $isActive: boolean }>`
   transform: ${props => (props.$isActive ? 'translateY(2px)' : 'none')};
   z-index: 1;
   transition: all 0.2s ease;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  align-items: center;
-  padding-bottom: 10px;
-  font-weight: bold;
-  font-size: 1.1rem;
+  padding: 0;
 
   /* Enhanced text selection prevention for all browsers including iOS */
   user-select: none;
@@ -96,13 +90,7 @@ const BlackKey = styled.button<{ $isActive: boolean; $leftOffset: number }>`
     props.$isActive ? '0 0 15px rgba(76, 175, 80, 0.8)' : '0 2px 8px rgba(0, 0, 0, 0.5)'};
   transform: ${props => (props.$isActive ? 'translateY(2px)' : 'none')};
   transition: all 0.2s ease;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  align-items: center;
-  padding-bottom: 5px;
-  font-weight: bold;
-  font-size: 0.9rem;
+  padding: 0;
 
   /* Enhanced text selection prevention for all browsers including iOS */
   user-select: none;
@@ -119,20 +107,14 @@ const BlackKey = styled.button<{ $isActive: boolean; $leftOffset: number }>`
 `;
 
 const NoteLabel = styled.div`
-  font-size: 1rem;
-  margin-bottom: 2px;
-
-  /* Enhanced text selection prevention for all browsers including iOS */
-  user-select: none;
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
-  -webkit-touch-callout: none;
-`;
-
-const OctaveLabel = styled.div`
-  font-size: 0.8rem;
-  opacity: 0.8;
+  position: absolute;
+  top: 10px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 1.2rem;
+  font-weight: bold;
+  margin: 0;
 
   /* Enhanced text selection prevention for all browsers including iOS */
   user-select: none;
@@ -395,6 +377,66 @@ const BLACK_KEY_POSITIONS = {
 const WHITE_KEYS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 const BLACK_KEYS = ['C♯', 'D♯', 'F♯', 'G♯', 'A♯'];
 
+// Define keyboard mappings for the piano keys
+const KEY_MAPPINGS = {
+  // White keys - bottom row for white keys
+  a: 'C',
+  s: 'D',
+  d: 'E',
+  f: 'F',
+  g: 'G',
+  h: 'A',
+  j: 'B',
+  // Extended octave
+  k: 'C', // Higher C
+  l: 'D', // Higher D
+  ';': 'E', // Higher E
+  "'": 'F', // Higher F
+
+  // Black keys - top row for black keys
+  w: 'C♯',
+  e: 'D♯',
+  t: 'F♯',
+  y: 'G♯',
+  u: 'A♯',
+  // Extended octave
+  o: 'C♯', // Higher C#
+  p: 'D♯', // Higher D#
+};
+
+// Update KeyLabel with better positioning
+const KeyLabel = styled.div`
+  position: absolute;
+  bottom: 10px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 0.9rem;
+  color: #444;
+  background-color: rgba(255, 255, 255, 0.7);
+  margin: 0 auto;
+  padding: 2px 0;
+  width: 80%;
+  border-radius: 3px;
+  font-weight: bold;
+  user-select: none;
+  -webkit-user-select: none;
+`;
+
+// Create specialized versions for black keys
+const BlackKeyNoteLabel = styled(NoteLabel)`
+  top: 5px;
+  font-size: 1rem;
+  color: white;
+`;
+
+const BlackKeyLabel = styled(KeyLabel)`
+  bottom: 5px;
+  color: white;
+  background-color: rgba(0, 0, 0, 0.6);
+  width: 90%;
+`;
+
 export default function Chorus() {
   const [isConnected, setIsConnected] = useState(false);
   const [isSoundEnabled, setIsSoundEnabled] = useState(false);
@@ -418,6 +460,9 @@ export default function Chorus() {
 
   // Add state to track if mouse/touch is down
   const [isPointerDown, setIsPointerDown] = useState(false);
+
+  // Remove the focus state - always enable keyboard
+  const keyboardContainerRef = useRef<HTMLDivElement>(null);
 
   // Initialize PeerJS and handle connections
   useEffect(() => {
@@ -1519,8 +1564,11 @@ export default function Chorus() {
       console.log(`Changing octave from ${prev} to ${newOctave}`);
 
       if (prev !== newOctave && peerRef.current) {
+        // Store currently playing notes
+        const playingNotes = new Map(activeNotes);
+
         // Stop all currently playing notes at the old octave
-        activeNotes.forEach((note, noteId) => {
+        playingNotes.forEach((note, noteId) => {
           stopTone('local-' + noteId);
 
           // Create a release message for each active note
@@ -1542,6 +1590,57 @@ export default function Chorus() {
 
         // Clear active notes
         setActiveNotes(new Map());
+
+        // Play the same notes at the new octave after a brief delay to ensure clean transition
+        setTimeout(() => {
+          playingNotes.forEach((note, noteId) => {
+            // Generate new noteId with new octave
+            const newNoteId = noteId.replace(`-${prev}`, `-${newOctave}`);
+
+            // Play note at new octave
+            if (peerRef.current) {
+              // Play locally
+              playTone('local-' + newNoteId, note, selectedTone, newOctave);
+
+              // Update active notes
+              setActiveNotes(prev => {
+                const updatedMap = new Map(prev);
+                updatedMap.set(newNoteId, note);
+                return updatedMap;
+              });
+
+              // Create press message for the note at new octave
+              const pressMessage: ToneMessage = {
+                type: 'tone',
+                note: note,
+                oscillatorType: selectedTone,
+                peerId: peerRef.current.id,
+                octave: newOctave,
+                action: 'press',
+                noteId: newNoteId,
+              };
+
+              // Send press message
+              sendMessageToConnections(pressMessage);
+
+              // Record this in note event history
+              const noteEvent: NoteEventData = {
+                type: 'noteEvent',
+                action: 'play',
+                note: note,
+                oscillatorType: selectedTone,
+                peerId: peerRef.current.id,
+                timestamp: Date.now(),
+                octave: newOctave,
+              };
+
+              setNoteEvents(prev => {
+                const newEvents = [...prev, noteEvent].slice(-50);
+                return newEvents;
+              });
+            }
+          });
+        }, 50); // Small delay for clean transition
       }
 
       return newOctave;
@@ -1561,10 +1660,255 @@ export default function Chorus() {
     return note;
   };
 
+  // Get keyboard key that is mapped to a note
+  const getKeyForNote = (note: string) => {
+    return Object.entries(KEY_MAPPINGS).find(([_, mappedNote]) => mappedNote === note)?.[0];
+  };
+
+  // Add different octave for higher keyboard keys
+  const getNoteOctave = (_note: string, keyPressed: string) => {
+    // Higher octave for keys k, l, ;, ', o, p
+    const higherOctaveKeys = ['k', 'l', ';', "'", 'o', 'p'];
+    if (higherOctaveKeys.includes(keyPressed)) {
+      return currentOctave + 1;
+    }
+    return currentOctave;
+  };
+
+  // Auto-focus the keyboard when component mounts
+  useEffect(() => {
+    if (keyboardContainerRef.current) {
+      keyboardContainerRef.current.focus();
+    }
+  }, []);
+
+  // Update keyboard event handlers to always be active (not dependent on focus)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore key events if the user is typing in an input field or textarea
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      const key = e.key.toLowerCase();
+
+      // Check if this key is mapped to a note
+      if (KEY_MAPPINGS[key as keyof typeof KEY_MAPPINGS]) {
+        const note = KEY_MAPPINGS[key as keyof typeof KEY_MAPPINGS];
+        const octave = getNoteOctave(note, key);
+
+        // Check if this key is already pressed (to prevent repeat events)
+        if (e.repeat || activeNotes.has(`keyboard-${key}-${octave}`)) return;
+
+        // Create a synthetic event
+        const syntheticEvent = {
+          stopPropagation: () => {},
+          preventDefault: () => {},
+        } as React.MouseEvent<HTMLButtonElement>;
+
+        // Play the note with the specific octave
+        handleKeyboardNotePress(note, key, octave, syntheticEvent);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      // Ignore key events if the user is typing in an input field or textarea
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      const key = e.key.toLowerCase();
+
+      // Check if this key is mapped to a note
+      if (KEY_MAPPINGS[key as keyof typeof KEY_MAPPINGS]) {
+        const note = KEY_MAPPINGS[key as keyof typeof KEY_MAPPINGS];
+        const octave = getNoteOctave(note, key);
+
+        // Create a synthetic event
+        const syntheticEvent = {
+          stopPropagation: () => {},
+          preventDefault: () => {},
+        } as React.MouseEvent<HTMLButtonElement>;
+
+        // Release the note
+        handleKeyboardNoteRelease(note, key, octave, syntheticEvent);
+      }
+    };
+
+    // Add event listeners
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [activeNotes, currentOctave]);
+
+  // Special keyboard note handlers that include the key and octave
+  const handleKeyboardNotePress = (
+    note: string,
+    key: string,
+    octave: number,
+    event: React.MouseEvent | React.TouchEvent
+  ) => {
+    if (event) {
+      event.stopPropagation();
+    }
+
+    console.log(`Keyboard note pressed: ${note} (key: ${key}), octave: ${octave}`);
+
+    if (!peerRef.current) {
+      console.error('Cannot send tone update: peer is null');
+      return;
+    }
+
+    // Generate a unique ID for this key-specific note
+    const noteId = `keyboard-${key}-${octave}`;
+
+    // If note is already active, do nothing
+    if (activeNotes.has(noteId)) {
+      return;
+    }
+
+    // Add to active notes
+    setActiveNotes(prev => {
+      const newMap = new Map(prev);
+      newMap.set(noteId, note);
+      return newMap;
+    });
+
+    // Create the message with action = press
+    const message: ToneMessage = {
+      type: 'tone',
+      note: note,
+      oscillatorType: selectedTone,
+      peerId: peerRef.current.id,
+      octave: octave,
+      action: 'press',
+      noteId: noteId,
+    };
+
+    // Record this in our own note event history
+    const noteEvent: NoteEventData = {
+      type: 'noteEvent',
+      action: 'play',
+      note: note,
+      oscillatorType: selectedTone,
+      peerId: peerRef.current.id,
+      timestamp: Date.now(),
+      octave: octave,
+    };
+
+    setNoteEvents(prev => {
+      const newEvents = [...prev, noteEvent].slice(-50);
+      return newEvents;
+    });
+
+    console.log('Sending keyboard press message:', message);
+
+    // Play locally
+    console.log('Playing keyboard note locally:', note);
+    playTone('local-' + noteId, note, selectedTone, octave);
+
+    // If we're the CHORUS, handle the message locally
+    if (peerRef.current.id === ROOM_ID) {
+      console.log('I am CHORUS, processing keyboard message locally');
+      processIncomingMessage(message);
+    }
+
+    // Send to all connections
+    sendMessageToConnections(message);
+  };
+
+  const handleKeyboardNoteRelease = (
+    note: string,
+    key: string,
+    octave: number,
+    event: React.MouseEvent | React.TouchEvent
+  ) => {
+    if (event) {
+      event.stopPropagation();
+    }
+
+    console.log(`Keyboard note released: ${note} (key: ${key}), octave: ${octave}`);
+
+    if (!peerRef.current) {
+      console.error('Cannot send tone update: peer is null');
+      return;
+    }
+
+    // Get the noteId for this note
+    const noteId = `keyboard-${key}-${octave}`;
+
+    // If note is not active, do nothing
+    if (!activeNotes.has(noteId)) {
+      return;
+    }
+
+    // Remove from active notes
+    setActiveNotes(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(noteId);
+      return newMap;
+    });
+
+    // Create the message with action = release
+    const message: ToneMessage = {
+      type: 'tone',
+      note: note,
+      oscillatorType: selectedTone,
+      peerId: peerRef.current.id,
+      octave: octave,
+      action: 'release',
+      noteId: noteId,
+    };
+
+    // Record this in our own note event history
+    const noteEvent: NoteEventData = {
+      type: 'noteEvent',
+      action: 'stop',
+      note: note,
+      oscillatorType: selectedTone,
+      peerId: peerRef.current.id,
+      timestamp: Date.now(),
+      octave: octave,
+    };
+
+    setNoteEvents(prev => {
+      const newEvents = [...prev, noteEvent].slice(-50);
+      return newEvents;
+    });
+
+    console.log('Sending keyboard release message:', message);
+
+    // Stop note locally
+    console.log('Stopping keyboard note locally:', note);
+    stopTone('local-' + noteId);
+
+    // If we're the CHORUS, handle the message locally
+    if (peerRef.current.id === ROOM_ID) {
+      console.log('I am CHORUS, processing keyboard message locally');
+      processIncomingMessage(message);
+    }
+
+    // Send to all connections
+    sendMessageToConnections(message);
+  };
+
+  // Update isNoteActive to check multiple possible active notes for the same musical note
   const isNoteActive = (note: string) => {
-    // Check if the specific note at the current octave is active
-    const noteId = peerRef.current ? `${peerRef.current.id}-${note}-${currentOctave}` : '';
-    return activeNotes.has(noteId);
+    // Check keyboard and touch/mouse activations
+    let isActive = false;
+
+    activeNotes.forEach((activeNote, _noteId) => {
+      if (activeNote === note) {
+        isActive = true;
+      }
+    });
+
+    return isActive;
   };
 
   return (
@@ -1644,55 +1988,61 @@ export default function Chorus() {
       </SharpFlatToggle>
 
       <Controls>
-        <KeyboardContainer>
+        <KeyboardContainer ref={keyboardContainerRef} tabIndex={0}>
           {/* Render white keys first as the base layer */}
-          {WHITE_KEYS.map(note => (
-            <WhiteKey
-              key={note}
-              data-note={note}
-              $isActive={isNoteActive(note)}
-              onMouseDown={e => {
-                handlePointerDown(e);
-                handleNotePress(note, e);
-              }}
-              onMouseUp={e => {
-                setIsPointerDown(false);
-                handleNoteRelease(note, e);
-              }}
-              onMouseEnter={e => handleNoteEnter(note, e)}
-              onMouseLeave={e => handleMouseLeave(note, e)}
-              onTouchStart={e => handleTouchStart(note, e)}
-              onTouchEnd={e => handleTouchEnd(note, e)}
-            >
-              <NoteLabel>{note}</NoteLabel>
-              <OctaveLabel>{currentOctave}</OctaveLabel>
-            </WhiteKey>
-          ))}
+          {WHITE_KEYS.map(note => {
+            const keyBinding = getKeyForNote(note);
+            return (
+              <WhiteKey
+                key={note}
+                data-note={note}
+                $isActive={isNoteActive(note)}
+                onMouseDown={e => {
+                  handlePointerDown(e);
+                  handleNotePress(note, e);
+                }}
+                onMouseUp={e => {
+                  setIsPointerDown(false);
+                  handleNoteRelease(note, e);
+                }}
+                onMouseEnter={e => handleNoteEnter(note, e)}
+                onMouseLeave={e => handleMouseLeave(note, e)}
+                onTouchStart={e => handleTouchStart(note, e)}
+                onTouchEnd={e => handleTouchEnd(note, e)}
+              >
+                <NoteLabel>{note}</NoteLabel>
+                {keyBinding && <KeyLabel>{keyBinding.toUpperCase()}</KeyLabel>}
+              </WhiteKey>
+            );
+          })}
 
           {/* Render black keys on top */}
-          {BLACK_KEYS.map(note => (
-            <BlackKey
-              key={note}
-              data-note={note}
-              $isActive={isNoteActive(note)}
-              $leftOffset={BLACK_KEY_POSITIONS[note as keyof typeof BLACK_KEY_POSITIONS]}
-              onMouseDown={e => {
-                handlePointerDown(e);
-                handleNotePress(note, e);
-              }}
-              onMouseUp={e => {
-                setIsPointerDown(false);
-                handleNoteRelease(note, e);
-              }}
-              onMouseEnter={e => handleNoteEnter(note, e)}
-              onMouseLeave={e => handleMouseLeave(note, e)}
-              onTouchStart={e => handleTouchStart(note, e)}
-              onTouchEnd={e => handleTouchEnd(note, e)}
-            >
-              <NoteLabel>{displayNote(note)}</NoteLabel>
-              <OctaveLabel>{currentOctave}</OctaveLabel>
-            </BlackKey>
-          ))}
+          {BLACK_KEYS.map(note => {
+            const keyBinding = getKeyForNote(note);
+            return (
+              <BlackKey
+                key={note}
+                data-note={note}
+                $isActive={isNoteActive(note)}
+                $leftOffset={BLACK_KEY_POSITIONS[note as keyof typeof BLACK_KEY_POSITIONS]}
+                onMouseDown={e => {
+                  handlePointerDown(e);
+                  handleNotePress(note, e);
+                }}
+                onMouseUp={e => {
+                  setIsPointerDown(false);
+                  handleNoteRelease(note, e);
+                }}
+                onMouseEnter={e => handleNoteEnter(note, e)}
+                onMouseLeave={e => handleMouseLeave(note, e)}
+                onTouchStart={e => handleTouchStart(note, e)}
+                onTouchEnd={e => handleTouchEnd(note, e)}
+              >
+                <BlackKeyNoteLabel>{displayNote(note)}</BlackKeyNoteLabel>
+                {keyBinding && <BlackKeyLabel>{keyBinding.toUpperCase()}</BlackKeyLabel>}
+              </BlackKey>
+            );
+          })}
         </KeyboardContainer>
       </Controls>
 
