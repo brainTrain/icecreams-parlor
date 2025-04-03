@@ -26,14 +26,17 @@ const Controls = styled.div`
   justify-content: center;
 `;
 
-const NoteButton = styled.button<{ $isActive: boolean }>`
-  width: 60px;
-  height: 60px;
-  background: ${props => (props.$isActive ? '#4CAF50' : '#3a3a3a')};
+const NoteButton = styled.button<{ $isActive: boolean; $isSharp?: boolean }>`
+  width: 55px;
+  height: 55px;
+  background: ${props => {
+    if (props.$isActive) return '#4CAF50';
+    return props.$isSharp ? '#222222' : '#3a3a3a';
+  }};
   border: ${props => (props.$isActive ? '3px solid #ffffff' : 'none')};
   border-radius: 8px;
   color: ${props => (props.$isActive ? '#ffffff' : '#cccccc')};
-  font-size: ${props => (props.$isActive ? '1.5rem' : '1.2rem')};
+  font-size: ${props => (props.$isActive ? '1.4rem' : '1.1rem')};
   font-weight: bold;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -43,6 +46,7 @@ const NoteButton = styled.button<{ $isActive: boolean }>`
   text-transform: uppercase;
   box-shadow: ${props => (props.$isActive ? '0 0 15px rgba(76, 175, 80, 0.8)' : 'none')};
   transform: ${props => (props.$isActive ? 'scale(1.1)' : 'scale(1)')};
+  position: relative;
 
   &:hover {
     background: ${props => (props.$isActive ? '#4CAF50' : '#4a4a4a')};
@@ -146,15 +150,71 @@ const ConnectionCount = styled.span<{ $count: number }>`
   transition: all 0.2s ease;
 `;
 
-const NOTES = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+const NOTES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
 const TONES = ['sine', 'square', 'triangle', 'sawtooth'];
 const ROOM_ID = 'CHORUS'; // Hardcoded peer ID that everyone will connect to
+
+// Create a mapping for displaying flats as an alternative to sharps
+const FLAT_EQUIVALENT = {
+  'C♯': 'D♭',
+  'D♯': 'E♭',
+  'F♯': 'G♭',
+  'G♯': 'A♭',
+  'A♯': 'B♭',
+};
+
+// Add styling for octave controls
+const OctaveControl = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  background-color: #2a2a2a;
+  padding: 0.75rem 1.25rem;
+  border-radius: 8px;
+  color: white;
+`;
+
+const OctaveButton = styled.button`
+  width: 36px;
+  height: 36px;
+  background-color: #3a3a3a;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 1.2rem;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background-color: #4a4a4a;
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+`;
+
+const OctaveDisplay = styled.div`
+  font-size: 1.1rem;
+  font-weight: bold;
+  min-width: 80px;
+  text-align: center;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  background-color: #1a1a1a;
+`;
 
 interface ToneMessage {
   type: 'tone';
   note: string | null;
   oscillatorType: string;
   peerId: string;
+  octave?: number; // Add octave to the message interface
 }
 
 // Create a single PeerJS instance outside the component
@@ -203,7 +263,33 @@ interface NoteEventData {
   peerId: string;
   timestamp: number;
   message?: string; // Optional message for system events
+  octave?: number; // Add octave to the interface
 }
+
+// Add a component for displaying note accidentals
+const SharpFlatToggle = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1rem 0;
+  background-color: #2a2a2a;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  color: white;
+`;
+
+const ToggleLabel = styled.label`
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+`;
+
+const ToggleSwitch = styled.input`
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+`;
 
 export default function Chorus() {
   const [isConnected, setIsConnected] = useState(false);
@@ -218,6 +304,9 @@ export default function Chorus() {
   const soundEnabledRef = useRef<boolean>(false);
   const isUserScrolledUpRef = useRef<boolean>(false);
   const [connectionCount, setConnectionCount] = useState<number>(0);
+  const [currentOctave, setCurrentOctave] = useState<number>(4);
+  // Add state for showing flats instead of sharps
+  const [showFlats, setShowFlats] = useState<boolean>(false);
 
   const peerRef = useRef<Peer | null>(null);
   const connections = useRef<Map<string, DataConnection>>(new Map());
@@ -451,6 +540,7 @@ export default function Chorus() {
           note: selectedNote,
           oscillatorType: selectedTone,
           peerId: peerRef.current.id,
+          octave: currentOctave,
         };
 
         console.log('Sending initial state to new connection:', initMessage);
@@ -510,6 +600,7 @@ export default function Chorus() {
           note: selectedNote,
           oscillatorType: selectedTone,
           peerId: peerRef.current.id,
+          octave: currentOctave,
         };
 
         console.log('Sending initial state to new connection:', initMessage);
@@ -554,8 +645,16 @@ export default function Chorus() {
     });
   };
 
-  const playTone = (peerId: string, note: string, oscillatorType: string) => {
-    console.log(`► Playing tone - Peer: ${peerId}, Note: ${note}, Type: ${oscillatorType}`);
+  // Modify playTone to use octave in frequency calculation
+  const playTone = (
+    peerId: string,
+    note: string,
+    oscillatorType: string,
+    octave: number = currentOctave
+  ) => {
+    console.log(
+      `► Playing tone - Peer: ${peerId}, Note: ${note}, Type: ${oscillatorType}, Octave: ${octave}`
+    );
 
     if (!audioContext.current || !isSoundEnabled) {
       console.warn('Cannot play tone - AudioContext not initialized or sound disabled');
@@ -575,7 +674,9 @@ export default function Chorus() {
     stopTone(peerId);
 
     try {
-      console.log(`Creating oscillator for ${peerId}, note: ${note}, type: ${oscillatorType}`);
+      console.log(
+        `Creating oscillator for ${peerId}, note: ${note}, type: ${oscillatorType}, octave: ${octave}`
+      );
 
       // Make sure we have a master gain node
       if (!gainNodes.current.has('master')) {
@@ -599,15 +700,36 @@ export default function Chorus() {
       oscillator.type = oscillatorType as OscillatorType;
 
       // Calculate the frequency - ensure noteIndex is valid
-      const noteIndex = NOTES.indexOf(note);
+      let noteIndex = NOTES.indexOf(note);
       if (noteIndex === -1) {
-        console.error(`Invalid note: ${note}`);
-        return;
+        // Check if it's a flat equivalent
+        const sharpEquivalent = Object.entries(FLAT_EQUIVALENT).find(
+          ([_, flat]) => flat === note
+        )?.[0];
+        if (sharpEquivalent) {
+          noteIndex = NOTES.indexOf(sharpEquivalent);
+        }
+
+        if (noteIndex === -1) {
+          console.error(`Invalid note: ${note}`);
+          return;
+        }
       }
 
-      // A4 = 440Hz, each semitone is a factor of 2^(1/12)
-      const frequency = 440 * Math.pow(2, noteIndex / 12);
-      console.log(`Setting frequency: ${frequency}Hz for note ${note}`);
+      // Updated frequency calculation with octave and chromatic notes
+      // A4 = 440Hz (A in octave 4)
+      // Each semitone is 2^(1/12) ratio in frequency
+      const A4_FREQ = 440;
+      const A4_NOTE_INDEX = NOTES.indexOf('A');
+      const A4_OCTAVE = 4;
+
+      // Calculate semitones from A4 (note that each octave has 12 semitones)
+      const semitoneDistance = (octave - A4_OCTAVE) * 12 + (noteIndex - A4_NOTE_INDEX);
+
+      // Calculate frequency using the formula: f = 440 * 2^(n/12)
+      const frequency = A4_FREQ * Math.pow(2, semitoneDistance / 12);
+
+      console.log(`Setting frequency: ${frequency.toFixed(2)}Hz for note ${note}${octave}`);
       oscillator.frequency.setValueAtTime(frequency, audioContext.current.currentTime);
 
       // Connect and start the oscillator
@@ -711,7 +833,7 @@ export default function Chorus() {
             console.log('Playing active tone for', peerId, tone.note);
             // Use a different ID for remote tones
             const remoteId = 'remote-' + peerId;
-            void playRemoteTone(remoteId, tone.note, tone.oscillatorType);
+            void playRemoteTone(remoteId, tone.note, tone.oscillatorType, tone.octave || 4);
           }
         });
       } catch (error) {
@@ -741,9 +863,16 @@ export default function Chorus() {
     }
   };
 
-  // Update the playRemoteTone function to not use ensureSoundEnabled
-  const playRemoteTone = async (remoteId: string, note: string, oscillatorType: string) => {
-    console.log(`🔊 REMOTE TONE: Playing ${note} with ${oscillatorType} for ${remoteId}`);
+  // Also update the remote tone function to use octave
+  const playRemoteTone = async (
+    remoteId: string,
+    note: string,
+    oscillatorType: string,
+    octave: number = currentOctave
+  ) => {
+    console.log(
+      `🔊 REMOTE TONE: Playing ${note} with ${oscillatorType} for ${remoteId}, Octave: ${octave}`
+    );
 
     // Check if sound is enabled directly
     if (!isSoundEnabled && !soundEnabledRef.current) {
@@ -767,7 +896,7 @@ export default function Chorus() {
       try {
         await audioContext.current.resume();
         // Retry after forcing resume
-        setTimeout(() => playRemoteTone(remoteId, note, oscillatorType), 100);
+        setTimeout(() => playRemoteTone(remoteId, note, oscillatorType, octave), 100);
         return;
       } catch (err) {
         console.error('Failed to resume AudioContext for remote tone:', err);
@@ -784,20 +913,37 @@ export default function Chorus() {
       osc.type = oscillatorType as OscillatorType;
 
       // Calculate frequency
-      const noteIndex = NOTES.indexOf(note);
+      let noteIndex = NOTES.indexOf(note);
       if (noteIndex === -1) {
-        console.error(`Invalid note: ${note}`);
-        return;
+        // Check if it's a flat equivalent
+        const sharpEquivalent = Object.entries(FLAT_EQUIVALENT).find(
+          ([_, flat]) => flat === note
+        )?.[0];
+        if (sharpEquivalent) {
+          noteIndex = NOTES.indexOf(sharpEquivalent);
+        }
+
+        if (noteIndex === -1) {
+          console.error(`Invalid note: ${note}`);
+          return;
+        }
       }
 
-      // Use a more precise frequency calculation
-      // A4 = 440Hz, C4 = 261.63Hz
-      // Each semitone is a factor of 2^(1/12)
-      const A4Index = NOTES.indexOf('A');
-      const semitoneDistance = noteIndex - A4Index;
-      const frequency = 440 * Math.pow(2, semitoneDistance / 12);
+      // Use a more precise frequency calculation with octave
+      // A4 = 440Hz, A in octave 4
+      const A4_FREQ = 440;
+      const A4_NOTE_INDEX = NOTES.indexOf('A');
+      const A4_OCTAVE = 4;
 
-      console.log(`💯 Setting frequency ${frequency.toFixed(2)}Hz for remote note ${note}`);
+      // Calculate semitones from A4
+      const semitoneDistance = (octave - A4_OCTAVE) * 12 + (noteIndex - A4_NOTE_INDEX);
+
+      // Calculate frequency using the formula: f = 440 * 2^(n/12)
+      const frequency = A4_FREQ * Math.pow(2, semitoneDistance / 12);
+
+      console.log(
+        `💯 Setting frequency ${frequency.toFixed(2)}Hz for remote note ${note}${octave}`
+      );
       osc.frequency.setValueAtTime(frequency, audioContext.current.currentTime);
 
       // Make sure we have a master gain node
@@ -829,6 +975,7 @@ export default function Chorus() {
     }
   };
 
+  // Update the handleNoteClick function to include octave in the message
   const handleNoteClick = (note: string) => {
     console.log('Note clicked:', note);
 
@@ -841,12 +988,13 @@ export default function Chorus() {
       return;
     }
 
-    // Create the message
+    // Create the message with octave
     const message: ToneMessage = {
       type: 'tone',
       note: newSelectedNote,
       oscillatorType: selectedTone,
       peerId: peerRef.current.id,
+      octave: currentOctave,
     };
 
     // Record this in our own note event history
@@ -857,6 +1005,7 @@ export default function Chorus() {
       oscillatorType: selectedTone,
       peerId: peerRef.current.id,
       timestamp: Date.now(),
+      octave: currentOctave,
     };
 
     setNoteEvents(prev => {
@@ -870,7 +1019,7 @@ export default function Chorus() {
     // IMPORTANT: Play locally regardless of role
     if (newSelectedNote) {
       console.log('Playing note locally:', newSelectedNote);
-      playTone('local-' + peerRef.current.id, newSelectedNote, selectedTone);
+      playTone('local-' + peerRef.current.id, newSelectedNote, selectedTone, currentOctave);
     } else {
       console.log('Stopping local note');
       stopTone('local-' + peerRef.current.id);
@@ -974,6 +1123,9 @@ export default function Chorus() {
         return;
       }
 
+      // Get the octave from the message or use default
+      const noteOctave = toneData.octave || 4;
+
       // Record this note event in history
       const noteEvent: NoteEventData = {
         type: 'noteEvent',
@@ -982,6 +1134,7 @@ export default function Chorus() {
         oscillatorType: toneData.oscillatorType,
         peerId: toneData.peerId,
         timestamp: Date.now(),
+        octave: noteOctave,
       };
 
       setNoteEvents(prev => {
@@ -1023,7 +1176,7 @@ export default function Chorus() {
             'with note',
             toneData.note
           );
-          void playRemoteTone(remoteId, toneData.note, toneData.oscillatorType);
+          void playRemoteTone(remoteId, toneData.note, toneData.oscillatorType, noteOctave);
         } else {
           console.log('❌ Sound disabled, not playing remote tone');
         }
@@ -1097,6 +1250,69 @@ export default function Chorus() {
     return () => clearInterval(interval);
   }, []);
 
+  // Update function to change octave and restart currently playing note
+  const changeOctave = (delta: number) => {
+    setCurrentOctave(prev => {
+      // Limit octave range between 1 and 7
+      const newOctave = Math.max(1, Math.min(7, prev + delta));
+      console.log(`Changing octave from ${prev} to ${newOctave}`);
+
+      // If a note is currently playing, restart it at the new octave
+      if (selectedNote && peerRef.current) {
+        console.log(`Restarting note ${selectedNote} at octave ${newOctave}`);
+
+        // First stop the current note
+        stopTone('local-' + peerRef.current.id);
+
+        // Then play the note at the new octave
+        setTimeout(() => {
+          // Check if peer reference is still valid
+          if (!peerRef.current) return;
+
+          playTone('local-' + peerRef.current.id, selectedNote, selectedTone, newOctave);
+
+          // Also send a new message to peers
+          if (connections.current.size > 0) {
+            const message: ToneMessage = {
+              type: 'tone',
+              note: selectedNote,
+              oscillatorType: selectedTone,
+              peerId: peerRef.current.id, // This is safe now with the check above
+              octave: newOctave,
+            };
+
+            // Send the message to all connected peers
+            connections.current.forEach((conn, id) => {
+              if (conn.open) {
+                console.log('Sending octave change to:', id);
+                try {
+                  conn.send(message);
+                } catch (err) {
+                  console.error('Error sending octave change to', id, err);
+                }
+              }
+            });
+          }
+        }, 50); // Small delay to ensure note is fully stopped
+      }
+
+      return newOctave;
+    });
+  };
+
+  // Add a function to toggle between sharps and flats
+  const toggleSharpFlat = () => {
+    setShowFlats(prev => !prev);
+  };
+
+  // Helper to display the note with correct accidental
+  const displayNote = (note: string): string => {
+    if (showFlats && FLAT_EQUIVALENT[note as keyof typeof FLAT_EQUIVALENT]) {
+      return FLAT_EQUIVALENT[note as keyof typeof FLAT_EQUIVALENT];
+    }
+    return note;
+  };
+
   return (
     <ChorusContainer>
       {/* Add prominent sound info message for iOS */}
@@ -1153,14 +1369,36 @@ export default function Chorus() {
 
       <StatusMessage>{status}</StatusMessage>
 
+      {/* Add octave controls */}
+      <OctaveControl>
+        <OctaveButton onClick={() => changeOctave(-1)}>−</OctaveButton>
+        <OctaveDisplay>Octave {currentOctave}</OctaveDisplay>
+        <OctaveButton onClick={() => changeOctave(1)}>+</OctaveButton>
+      </OctaveControl>
+
+      {/* Add toggle for sharps/flats */}
+      <SharpFlatToggle>
+        <ToggleSwitch
+          type="checkbox"
+          id="sharp-flat-toggle"
+          checked={showFlats}
+          onChange={toggleSharpFlat}
+        />
+        <ToggleLabel htmlFor="sharp-flat-toggle">
+          Show as: {showFlats ? 'Flats (♭)' : 'Sharps (♯)'}
+        </ToggleLabel>
+      </SharpFlatToggle>
+
       <Controls>
         {NOTES.map(note => (
           <NoteButton
             key={note}
             $isActive={selectedNote === note}
+            $isSharp={note.includes('♯')}
             onClick={() => handleNoteClick(note)}
           >
-            {note}
+            {displayNote(note)}
+            <sub>{currentOctave}</sub>
           </NoteButton>
         ))}
       </Controls>
@@ -1197,8 +1435,9 @@ export default function Chorus() {
                         ? 'You'
                         : `Peer ${event.peerId.substring(0, 6)}`}
                     </strong>{' '}
-                    {event.action === 'play' ? 'played' : 'stopped'} {event.note} with{' '}
-                    {event.oscillatorType} tone
+                    {event.action === 'play' ? 'played' : 'stopped'}{' '}
+                    {event.note ? displayNote(event.note) : null}
+                    {event.octave && <sub>{event.octave}</sub>} with {event.oscillatorType} tone
                   </div>
                 )}
               </NoteEvent>
