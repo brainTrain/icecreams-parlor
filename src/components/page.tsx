@@ -1,6 +1,6 @@
 import styled from 'styled-components';
-import BrowserSynth from './browser-synth';
-import DrumMachine from './drum-machine';
+// import BrowserSynth from './browser-synth';
+// import DrumMachine from './drum-machine';
 import Chorus from './chorus';
 
 const PageContainer = styled.div`
