@@ -34,6 +34,15 @@ const KeyboardContainer = styled.div`
   width: 100%;
   height: 130px;
   margin: 0 auto;
+
+  /* Enhanced text selection prevention for all browsers including iOS */
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 `;
 
 const WhiteKey = styled.button<{ $isActive: boolean }>`
@@ -57,8 +66,15 @@ const WhiteKey = styled.button<{ $isActive: boolean }>`
   padding-bottom: 10px;
   font-weight: bold;
   font-size: 1.1rem;
+
+  /* Enhanced text selection prevention for all browsers including iOS */
   user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  -webkit-touch-callout: none;
   touch-action: none;
+  -webkit-tap-highlight-color: transparent;
 
   &:hover {
     background: ${props => (props.$isActive ? '#4CAF50' : '#f0f0f0')};
@@ -87,8 +103,15 @@ const BlackKey = styled.button<{ $isActive: boolean; $leftOffset: number }>`
   padding-bottom: 5px;
   font-weight: bold;
   font-size: 0.9rem;
+
+  /* Enhanced text selection prevention for all browsers including iOS */
   user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  -webkit-touch-callout: none;
   touch-action: none;
+  -webkit-tap-highlight-color: transparent;
 
   &:hover {
     background: ${props => (props.$isActive ? '#4CAF50' : '#333333')};
@@ -98,13 +121,25 @@ const BlackKey = styled.button<{ $isActive: boolean; $leftOffset: number }>`
 const NoteLabel = styled.div`
   font-size: 1rem;
   margin-bottom: 2px;
+
+  /* Enhanced text selection prevention for all browsers including iOS */
   user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  -webkit-touch-callout: none;
 `;
 
 const OctaveLabel = styled.div`
   font-size: 0.8rem;
   opacity: 0.8;
+
+  /* Enhanced text selection prevention for all browsers including iOS */
   user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  -webkit-touch-callout: none;
 `;
 
 const ToneControl = styled.div`
