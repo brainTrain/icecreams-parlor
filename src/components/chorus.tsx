@@ -87,26 +87,10 @@ const PowerSwitch = styled.div`
   margin-bottom: 1rem;
 `;
 
-const SwitchContainer = styled.div`
-  position: relative;
-  width: 60px;
-  height: 30px;
-  background: #2a2a2a;
-  border-radius: 15px;
+const SoundCheckbox = styled.input`
+  width: 24px;
+  height: 24px;
   cursor: pointer;
-  transition: background 0.2s ease;
-`;
-
-const SwitchButton = styled.div<{ $isOn: boolean }>`
-  position: absolute;
-  top: 2px;
-  left: ${props => (props.$isOn ? '32px' : '2px')};
-  width: 26px;
-  height: 26px;
-  background: #ffffff;
-  border-radius: 50%;
-  transition: left 0.2s ease;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 `;
 
 const LED = styled.div<{ $isOn: boolean }>`
@@ -119,10 +103,11 @@ const LED = styled.div<{ $isOn: boolean }>`
   transition: all 0.2s ease;
 `;
 
-const PowerLabel = styled.div`
+const PowerLabel = styled.label`
   color: #ffffff;
-  font-size: 0.9rem;
+  font-size: 1.1rem;
   font-weight: 500;
+  cursor: pointer;
 `;
 
 const StatusMessage = styled.div`
@@ -212,9 +197,7 @@ export default function Chorus() {
   const [noteEvents, setNoteEvents] = useState<NoteEventData[]>([]);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [audioContextState, setAudioContextState] = useState<string>('not created');
-  // Add a new state for checking if sound is really enabled
   const soundEnabledRef = useRef<boolean>(false);
-  // Add a state to track if we've tried forcing sound on
   const [forceEnableAttempted, setForceEnableAttempted] = useState<boolean>(false);
 
   const peerRef = useRef<Peer | null>(null);
@@ -694,24 +677,19 @@ export default function Chorus() {
     }
   };
 
-  // Add effect to check audio state after component mounts
+  // Update effect to NOT auto-enable sound on load
   useEffect(() => {
     // Check if sound states are mismatched
     const checkSoundState = () => {
       console.log(
         `Checking initial sound state - UI: ${isSoundEnabled}, Ref: ${soundEnabledRef.current}`
       );
-      if (isSoundEnabled !== soundEnabledRef.current) {
-        console.log('Sound state mismatch - fixing');
-        soundEnabledRef.current = isSoundEnabled;
-      }
 
-      // If audio context exists but sound is off, fix that
-      if (audioContext.current && !isSoundEnabled) {
-        console.log('AudioContext exists but sound state is off - fixing');
-        setIsSoundEnabled(true);
-        soundEnabledRef.current = true;
-      }
+      // Just ensure the ref matches the state
+      soundEnabledRef.current = isSoundEnabled;
+
+      // Don't auto-enable sound - leave it off by default for iOS
+      console.log('Sound is OFF by default - click ENABLE SOUND for iOS devices');
     };
 
     // Run the check after a short delay to allow component to fully render
@@ -1144,18 +1122,52 @@ export default function Chorus() {
 
   return (
     <ChorusContainer>
+      {/* Add prominent sound info message for iOS */}
+      <div
+        style={{
+          backgroundColor: '#ff9800',
+          padding: '0.5rem 1rem',
+          marginBottom: '1rem',
+          borderRadius: '4px',
+          textAlign: 'center',
+          color: '#000',
+          fontWeight: 'bold',
+          fontSize: '1rem',
+        }}
+      >
+        Sound is OFF by default. iOS users MUST tap Enable Sound button.
+      </div>
+
+      {/* Move emergency button above the toggle for better visibility */}
+      <button
+        onClick={forceEnableSound}
+        style={{
+          backgroundColor: forceEnableAttempted ? '#66bb6a' : '#f44336',
+          color: 'white',
+          padding: '12px 16px',
+          borderRadius: '4px',
+          marginBottom: '15px',
+          border: 'none',
+          cursor: 'pointer',
+          fontWeight: 'bold',
+          boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+          fontSize: '1rem',
+          width: '100%',
+        }}
+      >
+        {forceEnableAttempted
+          ? '✓ SOUND ENABLED - TAP AGAIN IF NEEDED'
+          : '🔊 ENABLE SOUND (REQUIRED FOR iOS)'}
+      </button>
+
       <PowerSwitch>
-        <PowerLabel>SOUND</PowerLabel>
-        <SwitchContainer
-          onClick={toggleSound}
-          onTouchStart={e => {
-            e.preventDefault();
-            e.stopPropagation();
-            toggleSound();
-          }}
-        >
-          <SwitchButton $isOn={isSoundEnabled} />
-        </SwitchContainer>
+        <SoundCheckbox
+          type="checkbox"
+          id="sound-toggle"
+          checked={isSoundEnabled}
+          onChange={() => toggleSound()}
+        />
+        <PowerLabel htmlFor="sound-toggle">SOUND {isSoundEnabled ? '(ON)' : '(OFF)'}</PowerLabel>
         <LED $isOn={isSoundEnabled} />
         <div
           style={{
@@ -1174,38 +1186,6 @@ export default function Chorus() {
       </ConnectionStatus>
 
       <StatusMessage>{status}</StatusMessage>
-
-      <div
-        style={{
-          backgroundColor: '#2a2a2a',
-          padding: '0.5rem 1rem',
-          marginBottom: '1rem',
-          borderRadius: '4px',
-          textAlign: 'center',
-          color: '#FF5252',
-          fontWeight: 'bold',
-        }}
-      >
-        IMPORTANT: You must click SOUND to turn it ON in EACH browser window!
-      </div>
-
-      {/* Add emergency sound button */}
-      <button
-        onClick={forceEnableSound}
-        style={{
-          backgroundColor: forceEnableAttempted ? '#66bb6a' : '#f44336',
-          color: 'white',
-          padding: '10px 15px',
-          borderRadius: '4px',
-          marginBottom: '15px',
-          border: 'none',
-          cursor: 'pointer',
-          fontWeight: 'bold',
-          boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
-        }}
-      >
-        {forceEnableAttempted ? '✓ FORCE SOUND (CLICK AGAIN)' : '⚠️ EMERGENCY: FORCE ENABLE SOUND'}
-      </button>
 
       <Controls>
         {NOTES.map(note => (
