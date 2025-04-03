@@ -652,7 +652,7 @@ export default function Chorus() {
       }
     } else {
       // Stop all tones
-      oscillators.current.forEach((osc, peerId) => {
+      oscillators.current.forEach((_, peerId) => {
         stopTone(peerId);
       });
 
