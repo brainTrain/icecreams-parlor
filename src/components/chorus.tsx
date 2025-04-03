@@ -16,41 +16,89 @@ const ChorusContainer = styled.div`
 
 const Controls = styled.div`
   display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
+  flex-direction: column;
+  gap: 0;
   margin-bottom: 2rem;
   padding: 1rem;
   background: #2a2a2a;
   border-radius: 8px;
   width: 100%;
   justify-content: center;
+  position: relative;
 `;
 
-const NoteButton = styled.button<{ $isActive: boolean; $isSharp?: boolean }>`
-  width: 55px;
-  height: 55px;
-  background: ${props => {
-    if (props.$isActive) return '#4CAF50';
-    return props.$isSharp ? '#222222' : '#3a3a3a';
-  }};
-  border: ${props => (props.$isActive ? '3px solid #ffffff' : 'none')};
-  border-radius: 8px;
-  color: ${props => (props.$isActive ? '#ffffff' : '#cccccc')};
-  font-size: ${props => (props.$isActive ? '1.4rem' : '1.1rem')};
-  font-weight: bold;
-  cursor: pointer;
+const KeyboardContainer = styled.div`
+  position: relative;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  height: 130px;
+  margin: 0 auto;
+`;
+
+const WhiteKey = styled.button<{ $isActive: boolean }>`
+  position: relative;
+  background: ${props => (props.$isActive ? '#4CAF50' : '#ffffff')};
+  color: ${props => (props.$isActive ? '#ffffff' : '#000000')};
+  height: 130px;
+  min-width: 45px;
+  flex: 1;
+  border: 1px solid #555;
+  border-radius: 0 0 4px 4px;
+  box-shadow: ${props =>
+    props.$isActive ? '0 0 15px rgba(76, 175, 80, 0.8)' : '0 2px 5px rgba(0, 0, 0, 0.2)'};
+  transform: ${props => (props.$isActive ? 'translateY(2px)' : 'none')};
+  z-index: 1;
   transition: all 0.2s ease;
   display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
   align-items: center;
-  justify-content: center;
-  text-transform: uppercase;
-  box-shadow: ${props => (props.$isActive ? '0 0 15px rgba(76, 175, 80, 0.8)' : 'none')};
-  transform: ${props => (props.$isActive ? 'scale(1.1)' : 'scale(1)')};
-  position: relative;
+  padding-bottom: 10px;
+  font-weight: bold;
+  font-size: 1.1rem;
 
   &:hover {
-    background: ${props => (props.$isActive ? '#4CAF50' : '#4a4a4a')};
+    background: ${props => (props.$isActive ? '#4CAF50' : '#f0f0f0')};
   }
+`;
+
+const BlackKey = styled.button<{ $isActive: boolean; $leftOffset: number }>`
+  position: absolute;
+  top: 0;
+  left: ${props => props.$leftOffset}%;
+  width: 30px;
+  height: 80px;
+  background: ${props => (props.$isActive ? '#4CAF50' : '#222222')};
+  border: 1px solid #000;
+  border-radius: 0 0 4px 4px;
+  color: white;
+  z-index: 10;
+  box-shadow: ${props =>
+    props.$isActive ? '0 0 15px rgba(76, 175, 80, 0.8)' : '0 2px 8px rgba(0, 0, 0, 0.5)'};
+  transform: ${props => (props.$isActive ? 'translateY(2px)' : 'none')};
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  padding-bottom: 5px;
+  font-weight: bold;
+  font-size: 0.9rem;
+
+  &:hover {
+    background: ${props => (props.$isActive ? '#4CAF50' : '#333333')};
+  }
+`;
+
+const NoteLabel = styled.div`
+  font-size: 1rem;
+  margin-bottom: 2px;
+`;
+
+const OctaveLabel = styled.div`
+  font-size: 0.8rem;
+  opacity: 0.8;
 `;
 
 const ToneControl = styled.div`
@@ -290,6 +338,19 @@ const ToggleSwitch = styled.input`
   height: 20px;
   cursor: pointer;
 `;
+
+// Define the positions of black keys relative to white keys
+const BLACK_KEY_POSITIONS = {
+  'C♯': 10, // relative position between C and D
+  'D♯': 26.5, // relative position between D and E
+  'F♯': 60, // relative position between F and G
+  'G♯': 76.5, // relative position between G and A
+  'A♯': 93, // relative position between A and B
+};
+
+// Separate white and black keys for piano layout
+const WHITE_KEYS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+const BLACK_KEYS = ['C♯', 'D♯', 'F♯', 'G♯', 'A♯'];
 
 export default function Chorus() {
   const [isConnected, setIsConnected] = useState(false);
@@ -975,11 +1036,17 @@ export default function Chorus() {
     }
   };
 
-  // Update the handleNoteClick function to include octave in the message
-  const handleNoteClick = (note: string) => {
+  // Update the handleNoteClick function to ensure only one note can be active at a time
+  const handleNoteClick = (note: string, event?: React.MouseEvent) => {
+    // Stop propagation to prevent clicks from affecting keys underneath
+    if (event) {
+      event.stopPropagation();
+    }
+
     console.log('Note clicked:', note);
 
-    // Toggle the note
+    // If we're clicking the currently selected note, toggle it off
+    // Otherwise, change to the new note (and turn off any previous note)
     const newSelectedNote = selectedNote === note ? null : note;
     setSelectedNote(newSelectedNote);
 
@@ -1390,17 +1457,32 @@ export default function Chorus() {
       </SharpFlatToggle>
 
       <Controls>
-        {NOTES.map(note => (
-          <NoteButton
-            key={note}
-            $isActive={selectedNote === note}
-            $isSharp={note.includes('♯')}
-            onClick={() => handleNoteClick(note)}
-          >
-            {displayNote(note)}
-            <sub>{currentOctave}</sub>
-          </NoteButton>
-        ))}
+        <KeyboardContainer>
+          {/* Render white keys first as the base layer */}
+          {WHITE_KEYS.map(note => (
+            <WhiteKey
+              key={note}
+              $isActive={selectedNote === note}
+              onClick={e => handleNoteClick(note, e)}
+            >
+              <NoteLabel>{note}</NoteLabel>
+              <OctaveLabel>{currentOctave}</OctaveLabel>
+            </WhiteKey>
+          ))}
+
+          {/* Render black keys on top */}
+          {BLACK_KEYS.map(note => (
+            <BlackKey
+              key={note}
+              $isActive={selectedNote === note}
+              $leftOffset={BLACK_KEY_POSITIONS[note as keyof typeof BLACK_KEY_POSITIONS]}
+              onClick={e => handleNoteClick(note, e)}
+            >
+              <NoteLabel>{displayNote(note)}</NoteLabel>
+              <OctaveLabel>{currentOctave}</OctaveLabel>
+            </BlackKey>
+          ))}
+        </KeyboardContainer>
       </Controls>
 
       <ToneControl>
