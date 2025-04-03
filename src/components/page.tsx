@@ -27,7 +27,7 @@ const Section = styled.div`
 function Page() {
   return (
     <PageContainer>
-      <Title>Browser Synth</Title>
+      <Title>Synth Chat 🎶🤖</Title>
       <Section>{/* <BrowserSynth /> */}</Section>
       <Section>{/* <DrumMachine /> */}</Section>
       <Section>
