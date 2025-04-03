@@ -212,6 +212,10 @@ export default function Chorus() {
   const [noteEvents, setNoteEvents] = useState<NoteEventData[]>([]);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [audioContextState, setAudioContextState] = useState<string>('not created');
+  // Add a new state for checking if sound is really enabled
+  const soundEnabledRef = useRef<boolean>(false);
+  // Add a state to track if we've tried forcing sound on
+  const [forceEnableAttempted, setForceEnableAttempted] = useState<boolean>(false);
 
   const peerRef = useRef<Peer | null>(null);
   const connections = useRef<Map<string, DataConnection>>(new Map());
@@ -410,8 +414,29 @@ export default function Chorus() {
 
       // Set up data handler
       conn.on('data', (data: any) => {
-        console.log('Received data from', conn.peer, ':', data);
-        processIncomingMessage(data);
+        console.log('🔴 Received data from', conn.peer, ':', data);
+        // Ensure the audio context is running before processing tone messages
+        if (data.type === 'tone' && isSoundEnabled && audioContext.current) {
+          // Make sure audio context is running
+          if (audioContext.current.state !== 'running') {
+            console.log('Auto-resuming audio context to handle incoming tone');
+            audioContext.current
+              .resume()
+              .then(() => {
+                // Process the message after audio context is running
+                processIncomingMessage(data);
+              })
+              .catch(err => {
+                console.error('Failed to resume audio context:', err);
+              });
+          } else {
+            // Audio context is already running, process normally
+            processIncomingMessage(data);
+          }
+        } else {
+          // Non-tone messages or sound disabled
+          processIncomingMessage(data);
+        }
       });
 
       // When connected, send our current state if we have a note active
@@ -599,11 +624,112 @@ export default function Chorus() {
     }
   };
 
-  const toggleSound = async () => {
-    console.log('Toggling sound. Current state:', isSoundEnabled);
+  // Add a force enable sound function that can be called directly from UI
+  const forceEnableSound = async () => {
+    console.log('🔥 FORCE ENABLING SOUND');
+    // Set both state flags
+    setIsSoundEnabled(true);
+    soundEnabledRef.current = true;
+    setForceEnableAttempted(true);
 
+    try {
+      // Create audio context if it doesn't exist
+      if (!audioContext.current) {
+        console.log('Creating new AudioContext for force enable');
+        audioContext.current = new AudioContext();
+      }
+
+      // Resume audio context if it's suspended
+      if (audioContext.current.state === 'suspended') {
+        console.log('Resuming suspended AudioContext for force enable');
+        await audioContext.current.resume();
+      }
+
+      setAudioContextState(audioContext.current.state);
+      console.log('AudioContext state:', audioContext.current.state);
+
+      // Create master gain node if it doesn't exist
+      if (!gainNodes.current.has('master')) {
+        console.log('Creating master gain node for force enable');
+        const gainNode = audioContext.current.createGain();
+        gainNode.gain.value = 0.9; // Very loud for testing
+        gainNode.connect(audioContext.current.destination);
+        gainNodes.current.set('master', gainNode);
+      }
+
+      // Play a LOUD test sound to verify audio works
+      const testOsc = audioContext.current.createOscillator();
+      testOsc.type = 'square'; // More audible
+      testOsc.frequency.setValueAtTime(440, audioContext.current.currentTime); // A4 note
+
+      // Use a gain node for the test sound
+      const testGain = audioContext.current.createGain();
+      testGain.gain.value = 0.8; // Quite loud!
+      testGain.connect(audioContext.current.destination);
+
+      testOsc.connect(testGain);
+      testOsc.start();
+      testOsc.stop(audioContext.current.currentTime + 0.5); // Play for 500ms - longer
+
+      console.log('🔊 TEST SOUND PLAYED - SHOULD BE LOUD!');
+
+      // Play another one after 1 second to make sure it's working
+      setTimeout(() => {
+        if (audioContext.current) {
+          const confirmOsc = audioContext.current.createOscillator();
+          confirmOsc.type = 'sawtooth'; // Even more noticeable
+          confirmOsc.frequency.setValueAtTime(523.25, audioContext.current.currentTime); // C5 note - higher
+          confirmOsc.connect(testGain);
+          confirmOsc.start();
+          confirmOsc.stop(audioContext.current.currentTime + 0.5);
+          console.log('🔊 CONFIRMATION SOUND PLAYED!');
+        }
+      }, 1000);
+
+      return true;
+    } catch (error) {
+      console.error('Failed to force enable audio:', error);
+      setAudioContextState('error: ' + (error as Error).message);
+      return false;
+    }
+  };
+
+  // Add effect to check audio state after component mounts
+  useEffect(() => {
+    // Check if sound states are mismatched
+    const checkSoundState = () => {
+      console.log(
+        `Checking initial sound state - UI: ${isSoundEnabled}, Ref: ${soundEnabledRef.current}`
+      );
+      if (isSoundEnabled !== soundEnabledRef.current) {
+        console.log('Sound state mismatch - fixing');
+        soundEnabledRef.current = isSoundEnabled;
+      }
+
+      // If audio context exists but sound is off, fix that
+      if (audioContext.current && !isSoundEnabled) {
+        console.log('AudioContext exists but sound state is off - fixing');
+        setIsSoundEnabled(true);
+        soundEnabledRef.current = true;
+      }
+    };
+
+    // Run the check after a short delay to allow component to fully render
+    const timer = setTimeout(checkSoundState, 1000);
+    return () => clearTimeout(timer);
+  }, [isSoundEnabled]);
+
+  // Update the toggleSound function to better handle state
+  const toggleSound = async () => {
+    console.log('🔈 Toggling sound. Current state:', isSoundEnabled);
+
+    // Always update both state and ref together
     if (!isSoundEnabled) {
       try {
+        // Set state first to avoid race conditions
+        setIsSoundEnabled(true);
+        soundEnabledRef.current = true;
+
         // Create audio context if it doesn't exist
         if (!audioContext.current) {
           console.log('Creating new AudioContext');
@@ -617,13 +743,13 @@ export default function Chorus() {
         }
 
         setAudioContextState(audioContext.current.state);
-        console.log('AudioContext state:', audioContext.current.state);
+        console.log('AudioContext state after resume:', audioContext.current.state);
 
         // Create master gain node if it doesn't exist
         if (!gainNodes.current.has('master')) {
           console.log('Creating master gain node');
           const gainNode = audioContext.current.createGain();
-          gainNode.gain.value = 0.5; // Increased from 0.3 for better audibility
+          gainNode.gain.value = 0.8; // Increased for better audibility
           gainNode.connect(audioContext.current.destination);
           gainNodes.current.set('master', gainNode);
         }
@@ -634,21 +760,30 @@ export default function Chorus() {
         testOsc.frequency.setValueAtTime(440, audioContext.current.currentTime); // A4 note
         testOsc.connect(gainNodes.current.get('master')!);
         testOsc.start();
-        testOsc.stop(audioContext.current.currentTime + 0.2); // Play for 200ms
+        testOsc.stop(audioContext.current.currentTime + 0.3); // Play for 300ms
 
         console.log('Test sound played');
-        setIsSoundEnabled(true);
 
-        // Play all active tones
+        // Double check state is set
+        setIsSoundEnabled(true);
+        soundEnabledRef.current = true;
+
+        // Play all active tones that were queued up
+        console.log('Playing all active tones:', activeTones.size);
         activeTones.forEach((tone, peerId) => {
           if (tone.note) {
             console.log('Playing active tone for', peerId, tone.note);
-            playTone(peerId, tone.note, tone.oscillatorType);
+            // Use a different ID for remote tones
+            const remoteId = 'remote-' + peerId;
+            void playRemoteTone(remoteId, tone.note, tone.oscillatorType);
           }
         });
       } catch (error) {
         console.error('Failed to initialize audio:', error);
         setAudioContextState('error: ' + (error as Error).message);
+        // Still keep state as enabled to allow for retries
+        setIsSoundEnabled(true);
+        soundEnabledRef.current = true;
       }
     } else {
       // Stop all tones
@@ -666,6 +801,95 @@ export default function Chorus() {
       }
 
       setIsSoundEnabled(false);
+      soundEnabledRef.current = false; // Update the ref to match the state
+    }
+  };
+
+  // Update the playRemoteTone function to not use ensureSoundEnabled
+  const playRemoteTone = async (remoteId: string, note: string, oscillatorType: string) => {
+    console.log(`🔊 REMOTE TONE: Playing ${note} with ${oscillatorType} for ${remoteId}`);
+
+    // Check if sound is enabled directly
+    if (!isSoundEnabled && !soundEnabledRef.current) {
+      console.error(`⛔ Cannot play remote tone - Sound is not enabled`);
+      return;
+    }
+
+    if (!audioContext.current) {
+      console.log('Creating missing AudioContext for remote tone');
+      try {
+        audioContext.current = new AudioContext();
+      } catch (e) {
+        console.error('Failed to create AudioContext for remote tone:', e);
+        return;
+      }
+    }
+
+    // Double-check audio context is running
+    if (audioContext.current.state !== 'running') {
+      console.log('Audio context not running, retrying after forced resume...');
+      try {
+        await audioContext.current.resume();
+        // Retry after forcing resume
+        setTimeout(() => playRemoteTone(remoteId, note, oscillatorType), 100);
+        return;
+      } catch (err) {
+        console.error('Failed to resume AudioContext for remote tone:', err);
+        return;
+      }
+    }
+
+    try {
+      // Stop any existing tone first
+      stopTone(remoteId);
+
+      // Create a new oscillator
+      const osc = audioContext.current.createOscillator();
+      osc.type = oscillatorType as OscillatorType;
+
+      // Calculate frequency
+      const noteIndex = NOTES.indexOf(note);
+      if (noteIndex === -1) {
+        console.error(`Invalid note: ${note}`);
+        return;
+      }
+
+      // Use a more precise frequency calculation
+      // A4 = 440Hz, C4 = 261.63Hz
+      // Each semitone is a factor of 2^(1/12)
+      const A4Index = NOTES.indexOf('A');
+      const semitoneDistance = noteIndex - A4Index;
+      const frequency = 440 * Math.pow(2, semitoneDistance / 12);
+
+      console.log(`💯 Setting frequency ${frequency.toFixed(2)}Hz for remote note ${note}`);
+      osc.frequency.setValueAtTime(frequency, audioContext.current.currentTime);
+
+      // Make sure we have a master gain node
+      if (!gainNodes.current.has('master')) {
+        console.log('Creating master gain node for remote tone');
+        const masterGain = audioContext.current.createGain();
+        masterGain.gain.value = 0.7; // Even louder
+        masterGain.connect(audioContext.current.destination);
+        gainNodes.current.set('master', masterGain);
+      }
+
+      // Create or reuse a gain node for this remote
+      if (!gainNodes.current.has(remoteId)) {
+        const gain = audioContext.current.createGain();
+        gain.gain.value = 0.8; // Even louder for remote tones for better audibility
+        gain.connect(gainNodes.current.get('master')!);
+        gainNodes.current.set(remoteId, gain);
+      }
+
+      // Connect and start
+      osc.connect(gainNodes.current.get(remoteId)!);
+      osc.start();
+      console.log(`🎹 STARTED remote oscillator for ${remoteId}`);
+
+      // Store the oscillator
+      oscillators.current.set(remoteId, osc);
+    } catch (e) {
+      console.error('Error playing remote tone:', e);
     }
   };
 
@@ -758,13 +982,13 @@ export default function Chorus() {
     console.log(`Sent message to ${messagesSent} connections`);
   };
 
-  // Fix processIncomingMessage to better log and handle tone messages
+  // Update the processIncomingMessage function
   const processIncomingMessage = (data: any) => {
     console.log('Processing message:', data);
 
     if (data.type === 'tone') {
       const toneData = data as ToneMessage;
-      console.log('Processing tone message:', toneData);
+      console.log('🎵 Processing tone message:', toneData);
 
       // Don't process our own messages that come back to us
       if (peerRef.current && toneData.peerId === peerRef.current.id) {
@@ -783,7 +1007,6 @@ export default function Chorus() {
       };
 
       setNoteEvents(prev => {
-        // Keep only the most recent 50 events
         const newEvents = [...prev, noteEvent].slice(-50);
         return newEvents;
       });
@@ -795,9 +1018,11 @@ export default function Chorus() {
         }
       }, 10);
 
+      const remoteId = 'remote-' + toneData.peerId;
+
       // Update the active tones
       if (toneData.note) {
-        console.log('Adding/updating tone for', toneData.peerId);
+        console.log('📣 Adding/updating remote tone for', toneData.peerId);
         // Add or update the tone
         setActiveTones(prev => {
           const newMap = new Map(prev);
@@ -805,16 +1030,31 @@ export default function Chorus() {
           return newMap;
         });
 
-        // Play the tone if sound is enabled
-        if (isSoundEnabled) {
-          console.log('Playing remote tone for', toneData.peerId, 'with note', toneData.note);
-          // Use a special ID for remote tones
-          playTone('remote-' + toneData.peerId, toneData.note, toneData.oscillatorType);
+        // Check both the state and ref for sound enabled
+        console.log(
+          `🔍 Sound enabled check - UI State: ${isSoundEnabled}, Ref: ${soundEnabledRef.current}, AudioContext: ${audioContext.current?.state || 'none'}`
+        );
+
+        // Force update of Sound state if conditions are mismatched
+        if (!isSoundEnabled && soundEnabledRef.current) {
+          console.log('State mismatch detected - fixing state');
+          setIsSoundEnabled(true);
+        }
+
+        // Play the tone if either the UI state or ref indicates sound is enabled
+        if (isSoundEnabled || soundEnabledRef.current) {
+          console.log(
+            '🔊 ATTEMPTING to play remote tone for',
+            toneData.peerId,
+            'with note',
+            toneData.note
+          );
+          void playRemoteTone(remoteId, toneData.note, toneData.oscillatorType);
         } else {
-          console.log('Sound disabled, not playing tone');
+          console.log('❌ Sound disabled, not playing remote tone');
         }
       } else {
-        console.log('Removing tone for', toneData.peerId);
+        console.log('❌ Removing tone for', toneData.peerId);
         // Remove the tone
         setActiveTones(prev => {
           const newMap = new Map(prev);
@@ -823,7 +1063,7 @@ export default function Chorus() {
         });
 
         // Stop the tone
-        stopTone('remote-' + toneData.peerId);
+        stopTone(remoteId);
       }
     } else if (data.type === 'system') {
       console.log('Received system message:', data);
@@ -917,8 +1157,15 @@ export default function Chorus() {
           <SwitchButton $isOn={isSoundEnabled} />
         </SwitchContainer>
         <LED $isOn={isSoundEnabled} />
-        <div style={{ marginLeft: '10px', fontSize: '0.7rem', color: '#aaa' }}>
-          Audio: {audioContextState}
+        <div
+          style={{
+            marginLeft: '10px',
+            fontSize: '0.8rem',
+            color: isSoundEnabled ? '#4CAF50' : '#FF5252',
+            fontWeight: 'bold',
+          }}
+        >
+          {isSoundEnabled ? '✓ ENABLED' : '✗ DISABLED'} ({audioContextState})
         </div>
       </PowerSwitch>
 
@@ -927,6 +1174,38 @@ export default function Chorus() {
       </ConnectionStatus>
 
       <StatusMessage>{status}</StatusMessage>
+
+      <div
+        style={{
+          backgroundColor: '#2a2a2a',
+          padding: '0.5rem 1rem',
+          marginBottom: '1rem',
+          borderRadius: '4px',
+          textAlign: 'center',
+          color: '#FF5252',
+          fontWeight: 'bold',
+        }}
+      >
+        IMPORTANT: You must click SOUND to turn it ON in EACH browser window!
+      </div>
+
+      {/* Add emergency sound button */}
+      <button
+        onClick={forceEnableSound}
+        style={{
+          backgroundColor: forceEnableAttempted ? '#66bb6a' : '#f44336',
+          color: 'white',
+          padding: '10px 15px',
+          borderRadius: '4px',
+          marginBottom: '15px',
+          border: 'none',
+          cursor: 'pointer',
+          fontWeight: 'bold',
+          boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+        }}
+      >
+        {forceEnableAttempted ? '✓ FORCE SOUND (CLICK AGAIN)' : '⚠️ EMERGENCY: FORCE ENABLE SOUND'}
+      </button>
 
       <Controls>
         {NOTES.map(note => (
