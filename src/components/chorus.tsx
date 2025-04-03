@@ -116,17 +116,6 @@ const StatusMessage = styled.div`
   margin-bottom: 1rem;
 `;
 
-const InfoBox = styled.div`
-  margin-top: 1rem;
-  padding: 1rem;
-  background-color: #1f1f1f;
-  border-radius: 4px;
-  color: white;
-  font-size: 0.9rem;
-  max-width: 100%;
-  word-break: break-word;
-`;
-
 const NOTES = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 const TONES = ['sine', 'square', 'triangle', 'sawtooth'];
 const ROOM_ID = 'CHORUS'; // Hardcoded peer ID that everyone will connect to
@@ -193,12 +182,11 @@ export default function Chorus() {
   const [selectedTone, setSelectedTone] = useState<string>('sine');
   const [activeTones, setActiveTones] = useState<Map<string, ToneMessage>>(new Map());
   const [status, setStatus] = useState<string>('Initializing...');
-  const [connectionInfo, setConnectionInfo] = useState<string>('No connection info available');
   const [noteEvents, setNoteEvents] = useState<NoteEventData[]>([]);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [audioContextState, setAudioContextState] = useState<string>('not created');
   const soundEnabledRef = useRef<boolean>(false);
-  const [forceEnableAttempted, setForceEnableAttempted] = useState<boolean>(false);
+  const isUserScrolledUpRef = useRef<boolean>(false);
 
   const peerRef = useRef<Peer | null>(null);
   const connections = useRef<Map<string, DataConnection>>(new Map());
@@ -607,76 +595,6 @@ export default function Chorus() {
     }
   };
 
-  // Add a force enable sound function that can be called directly from UI
-  const forceEnableSound = async () => {
-    console.log('🔥 FORCE ENABLING SOUND');
-    // Set both state flags
-    setIsSoundEnabled(true);
-    soundEnabledRef.current = true;
-    setForceEnableAttempted(true);
-
-    try {
-      // Create audio context if it doesn't exist
-      if (!audioContext.current) {
-        console.log('Creating new AudioContext for force enable');
-        audioContext.current = new AudioContext();
-      }
-
-      // Resume audio context if it's suspended
-      if (audioContext.current.state === 'suspended') {
-        console.log('Resuming suspended AudioContext for force enable');
-        await audioContext.current.resume();
-      }
-
-      setAudioContextState(audioContext.current.state);
-      console.log('AudioContext state:', audioContext.current.state);
-
-      // Create master gain node if it doesn't exist
-      if (!gainNodes.current.has('master')) {
-        console.log('Creating master gain node for force enable');
-        const gainNode = audioContext.current.createGain();
-        gainNode.gain.value = 0.9; // Very loud for testing
-        gainNode.connect(audioContext.current.destination);
-        gainNodes.current.set('master', gainNode);
-      }
-
-      // Play a LOUD test sound to verify audio works
-      const testOsc = audioContext.current.createOscillator();
-      testOsc.type = 'square'; // More audible
-      testOsc.frequency.setValueAtTime(440, audioContext.current.currentTime); // A4 note
-
-      // Use a gain node for the test sound
-      const testGain = audioContext.current.createGain();
-      testGain.gain.value = 0.8; // Quite loud!
-      testGain.connect(audioContext.current.destination);
-
-      testOsc.connect(testGain);
-      testOsc.start();
-      testOsc.stop(audioContext.current.currentTime + 0.5); // Play for 500ms - longer
-
-      console.log('🔊 TEST SOUND PLAYED - SHOULD BE LOUD!');
-
-      // Play another one after 1 second to make sure it's working
-      setTimeout(() => {
-        if (audioContext.current) {
-          const confirmOsc = audioContext.current.createOscillator();
-          confirmOsc.type = 'sawtooth'; // Even more noticeable
-          confirmOsc.frequency.setValueAtTime(523.25, audioContext.current.currentTime); // C5 note - higher
-          confirmOsc.connect(testGain);
-          confirmOsc.start();
-          confirmOsc.stop(audioContext.current.currentTime + 0.5);
-          console.log('🔊 CONFIRMATION SOUND PLAYED!');
-        }
-      }, 1000);
-
-      return true;
-    } catch (error) {
-      console.error('Failed to force enable audio:', error);
-      setAudioContextState('error: ' + (error as Error).message);
-      return false;
-    }
-  };
-
   // Update effect to NOT auto-enable sound on load
   useEffect(() => {
     // Check if sound states are mismatched
@@ -960,7 +878,49 @@ export default function Chorus() {
     console.log(`Sent message to ${messagesSent} connections`);
   };
 
-  // Update the processIncomingMessage function
+  // Improved scroll handler that uses refs
+  const handleChatScroll = () => {
+    if (!chatContainerRef.current) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+    // Use a larger tolerance (30px) to determine if at bottom
+    const isAtBottom = Math.abs(scrollHeight - scrollTop - clientHeight) < 30;
+
+    // Store scroll position directly in ref for immediate access
+    isUserScrolledUpRef.current = !isAtBottom;
+
+    console.log(`Chat scroll position: ${isAtBottom ? 'at bottom' : 'scrolled up'}`);
+  };
+
+  // Add scroll event listener
+  useEffect(() => {
+    const chatContainer = chatContainerRef.current;
+    if (chatContainer) {
+      chatContainer.addEventListener('scroll', handleChatScroll);
+    }
+
+    return () => {
+      if (chatContainer) {
+        chatContainer.removeEventListener('scroll', handleChatScroll);
+      }
+    };
+  }, []);
+
+  // Add a dedicated effect to handle scrolling whenever noteEvents changes
+  useEffect(() => {
+    // Only auto-scroll if the user hasn't manually scrolled up
+    if (!isUserScrolledUpRef.current && chatContainerRef.current) {
+      // Use requestAnimationFrame for smoother scrolling and to ensure DOM is ready
+      requestAnimationFrame(() => {
+        if (chatContainerRef.current) {
+          chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+          console.log('Auto-scrolled chat to bottom');
+        }
+      });
+    }
+  }, [noteEvents]); // This will run whenever noteEvents changes
+
+  // Update the processIncomingMessage function to remove manual scrolling
   const processIncomingMessage = (data: any) => {
     console.log('Processing message:', data);
 
@@ -989,18 +949,14 @@ export default function Chorus() {
         return newEvents;
       });
 
-      // Scroll to bottom of event history
-      setTimeout(() => {
-        if (chatContainerRef.current) {
-          chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-        }
-      }, 10);
+      // No need for manual scrolling here - the useEffect will handle it
 
       const remoteId = 'remote-' + toneData.peerId;
 
       // Update the active tones
       if (toneData.note) {
         console.log('📣 Adding/updating remote tone for', toneData.peerId);
+
         // Add or update the tone
         setActiveTones(prev => {
           const newMap = new Map(prev);
@@ -1045,6 +1001,7 @@ export default function Chorus() {
       }
     } else if (data.type === 'system') {
       console.log('Received system message:', data);
+
       // Add system messages to note events for visibility
       setNoteEvents(prev => {
         const systemEvent: NoteEventData = {
@@ -1058,6 +1015,8 @@ export default function Chorus() {
         };
         return [...prev, systemEvent].slice(-50);
       });
+
+      // No need for manual scrolling here - the useEffect will handle it
     }
   };
 
@@ -1069,56 +1028,6 @@ export default function Chorus() {
       handleNoteClick(selectedNote);
     }
   };
-
-  // Update this to test connections
-  const testConnections = () => {
-    console.log('Testing connections...');
-    console.log('Current number of connections:', connections.current.size);
-
-    // Build connection info
-    let info = `Peer ID: ${peerRef.current?.id || 'unknown'}\n`;
-    info += `Role: ${peerRef.current?.id === ROOM_ID ? 'CHORUS SERVER' : 'CLIENT'}\n`;
-    info += `Connections: ${connections.current.size}\n`;
-
-    if (connections.current.size === 0) {
-      if (peerRef.current?.id === ROOM_ID) {
-        setStatus('I am the CHORUS room - waiting for others to connect');
-        info += 'Waiting for clients to connect.\n';
-        info += '\nTo test this app:\n';
-        info += '1. Open another browser window/tab\n';
-        info += '2. Navigate to the same URL\n';
-        info += '3. Turn on SOUND in both windows\n';
-        info += '4. Click notes in either window\n';
-      } else {
-        info += 'Trying to connect to CHORUS...\n';
-        connectToChorus();
-      }
-    } else {
-      info += 'Connected peers:\n';
-      connections.current.forEach((conn, id) => {
-        info += `- ${id}: ${conn.open ? 'open' : 'closed'}\n`;
-        console.log(`Connection to ${id}: ${conn.open ? 'open' : 'closed'}`);
-        if (!conn.open) {
-          connections.current.delete(id);
-        }
-      });
-    }
-
-    setConnectionInfo(info);
-  };
-
-  // Add this effect to update connection info periodically
-  useEffect(() => {
-    // Update connection info initially
-    testConnections();
-
-    // Update connection info every 5 seconds
-    const interval = setInterval(() => {
-      testConnections();
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, []);
 
   return (
     <ChorusContainer>
@@ -1135,30 +1044,8 @@ export default function Chorus() {
           fontSize: '1rem',
         }}
       >
-        Sound is OFF by default. iOS users MUST tap Enable Sound button.
+        if you're on an iphone you need to have your ringer on to hear the sound
       </div>
-
-      {/* Move emergency button above the toggle for better visibility */}
-      <button
-        onClick={forceEnableSound}
-        style={{
-          backgroundColor: forceEnableAttempted ? '#66bb6a' : '#f44336',
-          color: 'white',
-          padding: '12px 16px',
-          borderRadius: '4px',
-          marginBottom: '15px',
-          border: 'none',
-          cursor: 'pointer',
-          fontWeight: 'bold',
-          boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
-          fontSize: '1rem',
-          width: '100%',
-        }}
-      >
-        {forceEnableAttempted
-          ? '✓ SOUND ENABLED - TAP AGAIN IF NEEDED'
-          : '🔊 ENABLE SOUND (REQUIRED FOR iOS)'}
-      </button>
 
       <PowerSwitch>
         <SoundCheckbox
@@ -1240,25 +1127,6 @@ export default function Chorus() {
           )}
         </ChatMessagesContainer>
       </ChatContainer>
-
-      <button
-        onClick={testConnections}
-        style={{
-          marginTop: '1rem',
-          padding: '0.5rem 1rem',
-          backgroundColor: '#2a2a2a',
-          color: 'white',
-          border: 'none',
-          borderRadius: '4px',
-          cursor: 'pointer',
-        }}
-      >
-        Test Connections
-      </button>
-
-      <InfoBox>
-        <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{connectionInfo}</pre>
-      </InfoBox>
     </ChorusContainer>
   );
 }
