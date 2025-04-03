@@ -116,6 +116,34 @@ const StatusMessage = styled.div`
   margin-bottom: 1rem;
 `;
 
+const ConnectionBadge = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #2a2a2a;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  color: white;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+  gap: 0.5rem;
+  font-weight: bold;
+`;
+
+const ConnectionCount = styled.span<{ $count: number }>`
+  background-color: ${props => (props.$count > 1 ? '#4CAF50' : '#ffaa00')};
+  color: #000;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: ${props => (props.$count > 9 ? '0.8rem' : '1rem')};
+  transition: all 0.2s ease;
+`;
+
 const NOTES = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 const TONES = ['sine', 'square', 'triangle', 'sawtooth'];
 const ROOM_ID = 'CHORUS'; // Hardcoded peer ID that everyone will connect to
@@ -187,6 +215,7 @@ export default function Chorus() {
   const [audioContextState, setAudioContextState] = useState<string>('not created');
   const soundEnabledRef = useRef<boolean>(false);
   const isUserScrolledUpRef = useRef<boolean>(false);
+  const [connectionCount, setConnectionCount] = useState<number>(0);
 
   const peerRef = useRef<Peer | null>(null);
   const connections = useRef<Map<string, DataConnection>>(new Map());
@@ -369,6 +398,9 @@ export default function Chorus() {
       connections.current.set(conn.peer, conn);
       setIsConnected(true);
 
+      // Update connection count
+      setConnectionCount(connections.current.size + 1);
+
       // Send a confirmation message to the new peer
       if (peerRef.current && peerRef.current.id === ROOM_ID) {
         console.log('I am CHORUS, sending welcome message to new peer:', conn.peer);
@@ -430,6 +462,9 @@ export default function Chorus() {
       // Remove the connection
       connections.current.delete(conn.peer);
 
+      // Update connection count
+      setConnectionCount(connections.current.size + 1);
+
       // Remove any active tones from this peer
       setActiveTones(prev => {
         const newMap = new Map(prev);
@@ -490,6 +525,9 @@ export default function Chorus() {
 
       // Remove the connection
       connections.current.delete(conn.peer);
+
+      // Update connection count
+      setConnectionCount(connections.current.size + 1);
 
       // Remove any active tones from this peer
       setActiveTones(prev => {
@@ -1029,6 +1067,34 @@ export default function Chorus() {
     }
   };
 
+  // Add effect to update connection count
+  useEffect(() => {
+    // Function to update the connection count
+    const updateConnectionCount = () => {
+      // Add 1 to count for the current user
+      const count = connections.current.size + 1;
+      setConnectionCount(count);
+    };
+
+    // Set initial count
+    updateConnectionCount();
+
+    // Setup interval to periodically check connections
+    const interval = setInterval(() => {
+      // Clean up any closed connections first
+      connections.current.forEach((conn, id) => {
+        if (!conn.open) {
+          console.log(`Removing closed connection to ${id}`);
+          connections.current.delete(id);
+        }
+      });
+
+      updateConnectionCount();
+    }, 5000); // Check every 5 seconds
+
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <ChorusContainer>
       {/* Add prominent sound info message for iOS */}
@@ -1071,6 +1137,17 @@ export default function Chorus() {
       <ConnectionStatus $isConnected={isConnected}>
         {isConnected ? 'Connected' : 'Disconnected'}
       </ConnectionStatus>
+
+      {/* Add user count badge */}
+      <ConnectionBadge>
+        <span>👥 Online:</span>
+        <ConnectionCount $count={connectionCount}>{connectionCount}</ConnectionCount>
+        {connectionCount === 1
+          ? 'Just You'
+          : connectionCount === 2
+            ? 'You + 1 other'
+            : `You + ${connectionCount - 1} others`}
+      </ConnectionBadge>
 
       <StatusMessage>{status}</StatusMessage>
 
